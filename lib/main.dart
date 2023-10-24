@@ -6,6 +6,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
 import 'conv.dart';
 
+/* TODO
+ [] android version
+ [] msg logging & search
+ [] tab-like icon lists left and right of the title
+ [] markdown or similar highlight in msgs
+ [] send by Shift+Enter https://gist.github.com/elliette/d31aec75e000b3e2497a10d61bc6da0c https://api.flutter.dev/flutter/services/LogicalKeyboardKey-class.html
+ [] support casualllm-14b
+ [] disable excessive llama.cpp logs
+ */
+
 final ChatUser user_SYSTEM = ChatUser(
   id: '0',
   firstName: 'SYSTEM',
@@ -105,10 +115,12 @@ String truncateWithEllipsis(int cutoff, String myString) {
       : '${myString.substring(0, cutoff)}...';
 }
 
+const hermes_sysmsg = "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
+
 class _MyHomePageState extends State<MyHomePage> {
   final dialog = AIDialog(
       system_message:
-          "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.",
+          hermes_sysmsg,
       libpath: "librpcserver.dylib",
       modelpath: resolve_llm_file());
 
@@ -127,7 +139,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _reset_msgs() {
     _messages = [
       ChatMessage(
-        text: 'Beginning of conversation with model at ${dialog.modelpath}',
+        text: "Beginning of conversation with model at ${dialog.modelpath}\nSystem prompt: $hermes_sysmsg",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
       ),
@@ -176,7 +188,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   String serialize_msgs() {
     List<Map<String, String>> export_msgs =
-        List.from(_messages.map((e) => <String, String>{
+        List.from(_messages.reversed.map((e) => <String, String>{
               'user': e.user.getFullName(),
               'text': e.text.toString(),
               'createdAt': e.createdAt.toString()
@@ -287,7 +299,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     showOtherUsersAvatar: false,
                     onLongPressMessage: (m) {
                       String msg = "${m.user.getFullName()}: ${m.text}";
-                      FlutterClipboard.copy("test");
+                      FlutterClipboard.copy(msg);
                       final snackBar = SnackBar(
                         content: Text(
                             "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard"),

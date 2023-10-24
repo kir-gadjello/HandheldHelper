@@ -37,13 +37,12 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.2
-  dash_chat_2:
-    git:
-      url: file://./libraries/dash_chat2
-      ref: main # branch name
-
   file_picker: ^6.0.0
   clipboard: ^0.1.3
+  dash_chat_2:
+    git:
+      url: ./libraries/dash_chat2
+      ref: customizations # branch name
 
 dev_dependencies:
   ffigen: ^9.0.1
