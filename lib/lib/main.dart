@@ -6,7 +6,36 @@ import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
 import 'conv.dart';
+import 'package:isolate_handler/isolate_handler.dart';
 
+final isolates = IsolateHandler();
+int counter = 0;
+
+// Set new count and display current count.
+void setCounter(int count) {
+  counter = count;
+  print("Counter is now $counter");
+
+  // We will no longer be needing the isolate, let's dispose of it.
+  isolates.kill("counter");
+}
+
+// This function happens in the isolate.
+// Important: `entryPoint` should be either at root level or a static function.
+// Otherwise it will throw an exception.
+void entryPoint(Map<String, dynamic> context) {
+  // Calling initialize from the entry point with the context is
+  // required if communication is desired. It returns a messenger which
+  // allows listening and sending information to the main isolate.
+  final messenger = HandledIsolate.initialize(context);
+
+  // Triggered every time data is received from the main isolate.
+  messenger.listen((count) {
+    // Add one to the count and send the new value back to the main
+    // isolate.
+    messenger.send(++count);
+  });
+}
 /* TODO
  [] async exec
  [] android version
@@ -51,6 +80,15 @@ void main(List<String> args) async {
   //     print('Received result: $message');
   //   }
   // });
+
+  // Start the isolate at the `entryPoint` function.
+  isolates.spawn<int>(entryPoint,
+      name: "counter",
+      // Executed every time data is received from the spawned isolate.
+      onReceive: setCounter,
+      // Executed once when spawned isolate is ready for communication.
+      onInitialized: () => isolates.send(counter, to: "counter")
+  );
 
   runApp(const MyApp());
 }

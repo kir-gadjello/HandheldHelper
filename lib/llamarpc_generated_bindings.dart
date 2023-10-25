@@ -75,6 +75,36 @@ class LLamaRPC {
   late final _get_completion = _get_completionPtr
       .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
 
+  ffi.Pointer<ffi.Char> async_completion_init(
+    ffi.Pointer<ffi.Char> req_json,
+  ) {
+    return _async_completion_init(
+      req_json,
+    );
+  }
+
+  late final _async_completion_initPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(
+              ffi.Pointer<ffi.Char>)>>('async_completion_init');
+  late final _async_completion_init = _async_completion_initPtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
+  ffi.Pointer<ffi.Char> async_completion_poll(
+    ffi.Pointer<ffi.Char> cmd_json,
+  ) {
+    return _async_completion_poll(
+      cmd_json,
+    );
+  }
+
+  late final _async_completion_pollPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(
+              ffi.Pointer<ffi.Char>)>>('async_completion_poll');
+  late final _async_completion_poll = _async_completion_pollPtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
   void deinit() {
     return _deinit();
   }

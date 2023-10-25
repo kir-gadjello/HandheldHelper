@@ -45,6 +45,7 @@ dependencies:
       ref: customizations # branch name
   async: ^2.11.0
   isolate_rpc: ^1.1.4
+  isolate_handler: ^1.0.2
 
 dev_dependencies:
   ffigen: ^9.0.1

@@ -13,6 +13,10 @@ const char *json_rpc(const char *method, const char *path, const char *headers,
 
 const char* get_completion(const char* req_json);
 
+const char* async_completion_init(const char* req_json);
+
+const char* async_completion_poll(const char* cmd_json);
+
 void deinit();
 
 #ifdef __cplusplus

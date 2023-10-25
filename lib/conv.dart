@@ -6,7 +6,7 @@ import 'dart:isolate';
 import 'dart:async';
 import 'package:async/async.dart';
 
-import 'isolate_rpc.dart';
+// import 'isolate_rpc.dart';
 
 import 'llamarpc_generated_bindings.dart' as binding;
 
@@ -14,24 +14,26 @@ const kDebugMode = true;
 const String LLAMA_SO = "librpcserver";
 const bool __DEBUG = false;
 
+const _IM_END_ = ["<|im_end|>"];
+
 class LLAMAChatCompletion {
   String prompt = "";
   int max_tokens;
   double temperature;
-  String stop;
+  List<String> stop;
 
-  LLAMAChatCompletion(this.prompt, {
+  LLAMAChatCompletion(
+    this.prompt, {
     this.max_tokens = 512,
     this.temperature = 0.0,
-    this.stop = "<|im_end|>",
+    this.stop = _IM_END_,
   });
 
-  Map<String, dynamic> toJson() =>
-      {
+  Map<String, dynamic> toJson() => {
         'prompt': prompt,
         'n_predict': max_tokens,
         'temperature': temperature,
-        'stop': "<|im_end|>",
+        'stop': stop,
         'stream': false,
         '__debug': __DEBUG
       };
@@ -83,15 +85,61 @@ String trimLastCharacter(String srcStr, String pattern) {
 
 enum AIDialogSTATE { NOT_INITIALIZED, INITIALIZED_SUCCESS, INITIALIZED_FAILURE }
 
+class SUpdate {
+  String content = "";
+  bool stop = false;
+
+  SUpdate.fromJson(Map<String, dynamic> data) {
+    content = data['content'] ?? "";
+    stop = data['stop'] ?? false;
+  }
+
+  toString() {
+    var ret = "<$content>";
+    if (stop) {
+      ret += "<STOP>";
+    }
+    return ret;
+  }
+}
+
+class AIChatPollResult {
+  bool success = false;
+  bool finished = false;
+  List<SUpdate> completion_updates = [];
+
+  AIChatPollResult();
+
+  AIChatPollResult.fromJson(Map<String, dynamic> data) {
+    success = data['success'] ?? false;
+    finished = data['finished'] ?? false;
+    if (data['completion_updates'] != null) {
+      completion_updates = List<SUpdate>.from(
+          data['completion_updates'].map((update) => SUpdate.fromJson(update)));
+    }
+  }
+
+  String joined({sep = ""}) {
+    return completion_updates.map((u) => u.content).join(sep);
+  }
+}
+
+String mergeAIChatPollResults(List<AIChatPollResult> updates, {sep = ""}) {
+  return updates.map((u) => u.joined(sep: sep)).join(sep);
+}
+
 class AIDialog {
   String system_message = "";
   String libpath = "$LLAMA_SO";
   String modelpath = "";
   String error = "";
 
+  bool streaming = false;
+  String stream_msg_acc = "";
+
   AIDialogSTATE state = AIDialogSTATE.NOT_INITIALIZED;
 
-  late List<AIChatMessage> msgs = [];
+  List<AIChatMessage> msgs = [];
 
   late binding.LLamaRPC rpc;
 
@@ -199,49 +247,141 @@ class AIDialog {
     return false;
   }
 
+  bool start_advance_stream({String? user_msg, bool fix_chatml = true}) {
+    streaming = true;
+
+    if (user_msg != null) {
+      msgs.add(AIChatMessage("user", user_msg));
+    }
+
+    if (msgs.last.role != "user") {
+      error = "Error: last message should have role user";
+      return false;
+    }
+
+    try {
+      String api_query = jsonEncode(LLAMAChatCompletion(format_chatml(msgs)));
+
+      if (__DEBUG) print("DEBUG: api_query=${api_query}");
+
+      final api_resp = rpc
+          .async_completion_init(api_query.toNativeUtf8().cast<ffi.Char>())
+          .cast<Utf8>()
+          .toDartString();
+
+      if (__DEBUG) print("RESPONSE: $api_resp");
+
+      // TODO: backoff if busy
+      bool resp = jsonDecode(api_resp)["success"] as bool;
+
+      return resp;
+
+      // if (fix_chatml) {
+      //   resp = fix_chatml_markup(resp);
+      // }
+      //
+      // msgs.add(AIChatMessage("assistant", resp));
+      // error = "";
+      // return true;
+      //
+      // // print("AI: $resp");
+    } catch (e) {
+      error = e.toString();
+      if (kDebugMode) {
+        print("Error: ${e}");
+      }
+    }
+
+    return false;
+  }
+
+// TODO: stop async generation with special cmd
+  AIChatPollResult poll_advance_stream({fix_chatml = true}) {
+    try {
+      String api_query = "{}";
+
+      final api_resp = rpc
+          .async_completion_poll(api_query.toNativeUtf8().cast<ffi.Char>())
+          .cast<Utf8>()
+          .toDartString();
+
+      // if (__DEBUG) print("RESPONSE: $api_resp");
+
+      // TODO: backoff if busy
+      // bool success = jsonDecode(api_resp)["success"] as bool;
+      // bool finished = jsonDecode(api_resp)["finished"] as bool;
+      // List<dynamic> completion_updates = jsonDecode(
+      //     api_resp)["completion_updates"];
+
+      var stream_update = AIChatPollResult.fromJson(jsonDecode(api_resp));
+
+      stream_msg_acc += stream_update.joined();
+
+      if (stream_update.finished) {
+        if (fix_chatml) {
+          stream_msg_acc = fix_chatml_markup(stream_msg_acc);
+        }
+
+        msgs.add(AIChatMessage("assistant", stream_msg_acc));
+        stream_msg_acc = "";
+        streaming = false;
+        error = "";
+      }
+
+      return stream_update;
+    } catch (e) {
+      error = e.toString();
+      if (kDebugMode) {
+        print("Error: ${error}");
+      }
+    }
+
+    return AIChatPollResult();
+  }
+
   void teardown() {
     rpc.deinit();
     state = AIDialogSTATE.NOT_INITIALIZED;
   }
 }
-
-class AIDMsg {}
-
-class AIDReinitMsg extends AIDMsg {
-  String? system_message;
-  String modelpath;
-
-  AIDReinitMsg({String? system_message = "", this.modelpath = ""});
-}
-
-class AIDAdvanceMsg extends AIDMsg {
-  String? user_msg;
-  bool fix_chatml;
-
-  AIDAdvanceMsg({String? user_msg, this.fix_chatml = true});
-}
-
-class AIDget_msgsMsg extends AIDMsg {}
-
-class AIDreset_msgsMsg extends AIDMsg {}
-
-class AIDTeardownMsg extends AIDMsg {}
-
-class AIDGetMsgsMsg extends AIDMsg {}
-
-class AIDMsgRet {}
-
-class AIDMsgsRet extends AIDMsgRet {
-  List<AIChatMessage> msgs;
-
-  AIDMsgsRet(this.msgs);
-}
-
-class AIDBoolRet extends AIDMsgRet {
-  bool flag;
-
-  AIDBoolRet(this.flag);
-}
+//
+// class AIDMsg {}
+//
+// class AIDReinitMsg extends AIDMsg {
+//   String? system_message;
+//   String modelpath;
+//
+//   AIDReinitMsg({String? system_message = "", this.modelpath = ""});
+// }
+//
+// class AIDAdvanceMsg extends AIDMsg {
+//   String? user_msg;
+//   bool fix_chatml;
+//
+//   AIDAdvanceMsg({String? user_msg, this.fix_chatml = true});
+// }
+//
+// class AIDget_msgsMsg extends AIDMsg {}
+//
+// class AIDreset_msgsMsg extends AIDMsg {}
+//
+// class AIDTeardownMsg extends AIDMsg {}
+//
+// class AIDGetMsgsMsg extends AIDMsg {}
+//
+// class AIDMsgRet {}
+//
+// class AIDMsgsRet extends AIDMsgRet {
+//   List<AIChatMessage> msgs;
+//
+//   AIDMsgsRet(this.msgs);
+// }
+//
+// class AIDBoolRet extends AIDMsgRet {
+//   bool flag;
+//
+//   AIDBoolRet(this.flag);
+// }
 
 // class _AIDialogServiceProcessor(AIDMsg rpc_msg) {
 //   AIDialog? dialog = null;
@@ -262,67 +402,91 @@ class AIDBoolRet extends AIDMsgRet {
 //   return AIDBoolRet(false);
 // }
 
-class _AIDialogServiceProcessor<T, U> extends StatefulRPCProcessor<T, U> {
-  late AIDialog dialog;
-
-  @override FutureOr<U> process(T rpc_incoming) {
-    var rpc_msg = rpc_incoming as AIDMsg;
-
-    AIDMsgRet ret = AIDBoolRet(false);
-
-    switch (rpc_msg) {
-      case AIDReinitMsg(system_message: var sm, modelpath: var mp):
-        {
-          if (dialog == null) {
-            dialog = AIDialog(system_message: sm ?? "", modelpath: mp);
-            ret = AIDBoolRet(true); // TODO init status check
-          } else {
-            ret = AIDBoolRet(
-                dialog.reinit(system_message: sm ?? "", modelpath: mp));
-          }
-        }
-      case AIDAdvanceMsg(user_msg: var user_msg, fix_chatml: var fix_chatml):
-        {
-          dialog.advance(user_msg: user_msg, fix_chatml: fix_chatml);
-          ret = AIDMsgsRet(dialog.msgs);
-        }
-      case AIDGetMsgsMsg():
-        {
-          ret = AIDMsgsRet(dialog.msgs);
-        }
-    }
-
-    return ret as FutureOr<U>;
-  }
-}
-
-class AIDialogService {
-  late IsolateRpc<AIDMsg, AIDMsgRet> _AIDialogRPC;
-
-  AIDialogService({system_message = "", libpath = "", modelpath = ""}) {
-    _AIDialogRPC = IsolateRpc.single(
-        processorFactory: () => _AIDialogServiceProcessor(),
-        // the execution logics, i.e. this is a plus one operation
-        debugName: "rpc" // this will be used as the Isolate name
-    );
-  }
-
-  FutureOr<bool> reinit (
-      {String? system_message, required String modelpath}) async {
-    var ret = await _AIDialogRPC.execute(AIDReinitMsg(system_message: system_message, modelpath: modelpath));
-    return Future.value((ret.result as AIDBoolRet).flag);
-  }
-
-  FutureOr<bool> advance({String? user_msg, bool fix_chatml = true}) async {
-    var ret = await _AIDialogRPC.execute(AIDAdvanceMsg(user_msg: user_msg, fix_chatml: fix_chatml));
-    return Future.value((ret.result as AIDBoolRet).flag);
-  }
-
-  FutureOr<List<AIChatMessage>> get_msgs() async {
-    var ret = await _AIDialogRPC.execute(AIDGetMsgsMsg());
-    return Future.value((ret.result as AIDMsgsRet).msgs);
-  }
-}
+// class _AIDialogServiceProcessor<T, U> extends StatefulRPCProcessor<T, U> {
+//   late AIDialog dialog;
+//
+//   @override FutureOr<U> process(T rpc_incoming) {
+//     var rpc_msg = rpc_incoming as AIDMsg;
+//
+//     AIDMsgRet ret = AIDBoolRet(false);
+//
+//     print("Pre Hello!");
+//
+//     if (rpc_msg is AIDGetMsgsMsg) {
+//       print("111111 Hello!");
+//       print(dialog.msgs.length);
+//       print("222222 Hello!");
+//       return AIDMsgsRet(dialog.msgs) as FutureOr<U>;
+//       print("333333 Hello!");
+//     }
+//
+//     switch (rpc_msg) {
+//       case AIDReinitMsg(system_message: var sm, modelpath: var mp):
+//         {
+//           if (dialog == null) {
+//             dialog = AIDialog(system_message: sm ?? "", modelpath: mp);
+//             ret = AIDBoolRet(dialog.state ==
+//                 AIDialogSTATE.INITIALIZED_SUCCESS); // TODO init status check
+//           } else {
+//             ret = AIDBoolRet(
+//                 dialog.reinit(system_message: sm ?? "", modelpath: mp));
+//           }
+//           return ret as FutureOr<U>;
+//         }
+//       case AIDAdvanceMsg(user_msg: var user_msg, fix_chatml: var fix_chatml):
+//         {
+//           dialog.advance(user_msg: user_msg, fix_chatml: fix_chatml);
+//           ret = AIDMsgsRet(dialog.msgs);
+//           return ret as FutureOr<U>;
+//         }
+//       case AIDGetMsgsMsg():
+//         {
+//           print("Post Hello!");
+//           ret = AIDMsgsRet(dialog.msgs);
+//           print(dialog.msgs.length);
+//           return ret as FutureOr<U>;
+//         }
+//
+//         return ret as FutureOr<U>;
+//     }
+//
+//     print("Post Hello!");
+//     return ret as FutureOr<U>;
+//   }
+// }
+//
+// class AIDialogService {
+//   late IsolateRpc<AIDMsg, AIDMsgRet> _AIDialogRPC;
+//
+//   AIDialogService({system_message = "", libpath = "", modelpath = ""}) {
+//     _AIDialogRPC = IsolateRpc.single(
+//         processorFactory: () => _AIDialogServiceProcessor(),
+//         debugName: "rpc" // this will be used as the Isolate name
+//     );
+//   }
+//
+//   FutureOr<bool> reinit(
+//       {String? system_message, required String modelpath}) async {
+//     var ret = await _AIDialogRPC.execute(
+//         AIDReinitMsg(system_message: system_message, modelpath: modelpath));
+//     return Future.value((ret.result as AIDBoolRet).flag);
+//   }
+//
+//   FutureOr<bool> advance({String? user_msg, bool fix_chatml = true}) async {
+//     var ret = await _AIDialogRPC.execute(
+//         AIDAdvanceMsg(user_msg: user_msg, fix_chatml: fix_chatml));
+//     // return Future.value((ret.result as AIDBoolRet).flag);
+//     return Future.value(true);
+//   }
+//
+//   FutureOr<List<AIChatMessage>> get_msgs() async {
+//     var ret = await _AIDialogRPC.execute(AIDGetMsgsMsg());
+//     if (ret.result == null) {
+//       return Future.value([]);
+//     }
+//     return Future.value((ret.result as AIDMsgsRet).msgs);
+//   }
+// }
 
 // The entrypoint that runs on the spawned isolate. Receives messages from
 // the main isolate, reads the contents of the file, decodes the JSON, and
