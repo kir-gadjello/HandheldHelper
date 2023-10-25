@@ -1,7 +1,23 @@
 #!/bin/bash
 
-cp ../llama.cpp/ggml-metal.metal native/
-cp ../llama.cpp/build/examples/server/librpcserver.dylib native/
-cp ../llama.cpp/build/libllama.dylib native/
+cd ../llama.cpp;
+# rm -rf build;
+# mkdir build;
+# cd build;
+# rm -rf .;
+# cmake .. -DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1
+# cmake --build . --config Release --target rpcserver server_oaicompat;
+#cd ..;
+
+
+cp ./build/examples/server/librpcserver.dylib ../handheld_helper/native/
+cp ./examples/server/rpcserver.h ../handheld_helper/native/
+cp ./examples/server/rpcserver.h ../handheld_helper/
+cp ./build/libllama.dylib ../handheld_helper/native/
+cp ./ggml-metal.metal ../handheld_helper/native/
+
+cd ../handheld_helper;
 cp native/ggml-metal.metal macos/Runner/
 cp native/*.dylib macos/Runner/
+
+flutter pub run ffigen;

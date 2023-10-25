@@ -8,6 +8,10 @@ extern "C" {
 
 int init(const char *cmd);
 
+void init_async(const char* cmd);
+
+const char *poll_system_status();
+
 const char *json_rpc(const char *method, const char *path, const char *headers,
                      const char *body);
 

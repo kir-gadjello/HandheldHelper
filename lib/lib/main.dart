@@ -1,41 +1,15 @@
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
+import 'package:flutter/services.dart';
+import 'custom_widgets.dart';
 import 'conv.dart';
-import 'package:isolate_handler/isolate_handler.dart';
 
-final isolates = IsolateHandler();
-int counter = 0;
-
-// Set new count and display current count.
-void setCounter(int count) {
-  counter = count;
-  print("Counter is now $counter");
-
-  // We will no longer be needing the isolate, let's dispose of it.
-  isolates.kill("counter");
-}
-
-// This function happens in the isolate.
-// Important: `entryPoint` should be either at root level or a static function.
-// Otherwise it will throw an exception.
-void entryPoint(Map<String, dynamic> context) {
-  // Calling initialize from the entry point with the context is
-  // required if communication is desired. It returns a messenger which
-  // allows listening and sending information to the main isolate.
-  final messenger = HandledIsolate.initialize(context);
-
-  // Triggered every time data is received from the main isolate.
-  messenger.listen((count) {
-    // Add one to the count and send the new value back to the main
-    // isolate.
-    messenger.send(++count);
-  });
-}
 /* TODO
  [] async exec
  [] android version
@@ -48,6 +22,36 @@ void entryPoint(Map<String, dynamic> context) {
  [] disable excessive llama.cpp logs
  [] web access with https://github.com/mozilla/readability & webview
  */
+
+class MyTextField extends StatefulWidget {
+  @override
+  _MyTextFieldState createState() => _MyTextFieldState();
+}
+
+class _MyTextFieldState extends State<MyTextField> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return RawKeyboardListener(
+      focusNode: FocusNode(),
+      onKey: (RawKeyEvent event) {
+        if (event.isShiftPressed &&
+            event.logicalKey == LogicalKeyboardKey.enter) {
+          // Handle the Shift + Enter key combination
+          print('Shift + Enter pressed');
+          // Add your event handling code here
+        }
+      },
+      child: TextField(
+        controller: _controller,
+        decoration: InputDecoration(
+          hintText: 'Enter text',
+        ),
+      ),
+    );
+  }
+}
 
 final ChatUser user_SYSTEM = ChatUser(
   id: '0',
@@ -66,30 +70,6 @@ final ChatUser user_ai = ChatUser(
 
 void main(List<String> args) async {
   print("CMD ARGS: ${args.join(',')}");
-
-  // var (isolate, isolateToMainStream) = await spawnIsolate();
-  //
-  // // Send a command to the isolate
-  // isolate.send({'command': 'compute', 'value': 10});
-  //
-  // // Listen for results from the isolate
-  // ReceivePort mainToIsolateStream = ReceivePort();
-  // isolate.addOnExitListener(mainToIsolateStream.sendPort, response: 'done');
-  // mainToIsolateStream.listen((message) {
-  //   if (message is int) {
-  //     print('Received result: $message');
-  //   }
-  // });
-
-  // Start the isolate at the `entryPoint` function.
-  isolates.spawn<int>(entryPoint,
-      name: "counter",
-      // Executed every time data is received from the spawned isolate.
-      onReceive: setCounter,
-      // Executed once when spawned isolate is ready for communication.
-      onInitialized: () => isolates.send(counter, to: "counter")
-  );
-
   runApp(const MyApp());
 }
 
@@ -99,6 +79,9 @@ class MyApp extends StatelessWidget {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
+    var colorScheme = ColorScheme.fromSeed(
+        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade50);
+
     return MaterialApp(
       title: 'Handheld Helper',
       debugShowCheckedModeBanner: false,
@@ -118,7 +101,7 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: colorScheme,
         useMaterial3: true,
       ),
       home: const MyHomePage(title: 'Handheld Helper LLM'),
@@ -145,7 +128,13 @@ class MyHomePage extends StatefulWidget {
 }
 
 String resolve_llm_file() {
-  var s = Platform.environment["MODELPATH"] ?? "";
+  var s = String.fromEnvironment("MODELPATH") ?? "";
+  print("MODEL: probing $s");
+  if (File(s).existsSync()) {
+    return s;
+  }
+
+  s = Platform.environment["MODELPATH"] ?? "";
   print("MODEL: probing $s");
   if (File(s).existsSync()) {
     return s;
@@ -172,18 +161,63 @@ String truncateWithEllipsis(int cutoff, String myString) {
       : '${myString.substring(0, cutoff)}...';
 }
 
-const hermes_sysmsg = "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
+const hermes_sysmsg =
+    "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
+
+class Settings {
+  int _msg_poll_ms = 20;
+}
+
+Map<String, dynamic> resolve_init_json() {
+  var s = String.fromEnvironment("LLAMA_INIT_JSON") ?? "";
+  if (s.isNotEmpty) {
+    return jsonDecode(s);
+  }
+
+  s = Platform.environment["LLAMA_INIT_JSON"] ?? "";
+  if (s.isNotEmpty) {
+    return jsonDecode(s);
+  }
+
+  s = "./llama_init.json";
+  print("MODEL: probing $s");
+  if (File(s).existsSync()) {
+    return jsonDecode(File(s).readAsStringSync());
+  }
+
+  return {};
+}
 
 class _MyHomePageState extends State<MyHomePage> {
-  final dialog = AIDialog(
-      system_message:
-          hermes_sysmsg,
-      libpath: "librpcserver.dylib",
-      modelpath: resolve_llm_file());
+  late AIDialog dialog;
 
   late List<ChatMessage> _messages = [];
+  List<ChatUser> _typingUsers = [];
+
+  bool _msg_streaming = false;
+  Timer? _msg_poll_timer;
+  Settings settings = Settings();
+  bool _initialized = false;
+
+  Map<String, dynamic> llama_init_json = {};
+
+  void unlock_actions() {
+    setState(() {
+      _initialized = true;
+    });
+  }
 
   _MyHomePageState() {
+    llama_init_json = resolve_init_json();
+    print("LLAMA_INIT_JSON: ${llama_init_json}");
+    dialog = AIDialog(
+        system_message: hermes_sysmsg,
+        libpath: "librpcserver.dylib",
+        modelpath: resolve_llm_file(),
+        llama_init_json: llama_init_json,
+        onInitDone: () {
+          unlock_actions();
+        });
     _reset_msgs();
   }
 
@@ -196,39 +230,88 @@ class _MyHomePageState extends State<MyHomePage> {
   void _reset_msgs() {
     _messages = [
       ChatMessage(
-        text: "Beginning of conversation with model at ${dialog.modelpath}\nSystem prompt: $hermes_sysmsg",
+        text:
+            "Beginning of conversation with model at ${dialog.modelpath}\nSystem prompt: $hermes_sysmsg",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
       ),
     ];
   }
 
-  void addMsg(ChatMessage m) {
+  void updateStreamingMsgView() {
     setState(() {
-      var success = dialog.advance(user_msg: m.text);
-      if (success) {
-        _messages.insert(0, m);
-        _messages.insert(
-            0,
-            ChatMessage(
-                user: user_ai,
-                text: dialog.msgs.last.content,
-                createdAt: dialog.msgs.last.createdAt));
-        print("MSGS: ${_messages.map((m) => m.text)}");
+      var poll_result = dialog.poll_advance_stream();
+      var finished = poll_result.finished;
+
+      if (finished) {
+        _msg_poll_timer?.cancel();
+        _msg_streaming = false;
+
+        String upd_str = poll_result.joined();
+
+        // if (upd_str.isNotEmpty) {
+        //   stdout.write("$upd_str");
+        // }
+
+        var completedMsg = dialog.msgs.last;
+
+        _messages[0].createdAt = completedMsg.createdAt;
+        _messages[0].text = completedMsg.content;
+
+        _typingUsers = [];
       } else {
-        _messages.insert(0, m);
-        _messages.insert(
-            0,
-            ChatMessage(
-                user: user_SYSTEM,
-                text: "ERROR: ${dialog.error}",
-                createdAt: DateTime.now()));
+        _messages[0].text = dialog.stream_msg_acc;
       }
     });
   }
 
+  void addMsg(ChatMessage m, {use_polling = true}) {
+    if (use_polling) {
+      var success = dialog.start_advance_stream(user_msg: m.text);
+      _msg_streaming = true;
+
+      setState(() {
+        _typingUsers = [user_ai];
+        _messages.insert(0, m);
+        var msg = ChatMessage(
+            user: user_ai,
+            text: "...", // TODO animation
+            createdAt: dialog.msgs.last.createdAt);
+        _messages.insert(0, msg);
+
+        _msg_poll_timer = Timer.periodic(
+            Duration(milliseconds: settings._msg_poll_ms), (timer) {
+          updateStreamingMsgView();
+        });
+      });
+    } else {
+      setState(() {
+        var success = dialog.advance(user_msg: m.text);
+        if (success) {
+          _messages.insert(0, m);
+          _messages.insert(
+              0,
+              ChatMessage(
+                  user: user_ai,
+                  text: dialog.msgs.last.content,
+                  createdAt: dialog.msgs.last.createdAt));
+          print("MSGS: ${_messages.map((m) => m.text)}");
+        } else {
+          _messages.insert(0, m);
+          _messages.insert(
+              0,
+              ChatMessage(
+                  user: user_SYSTEM,
+                  text: "ERROR: ${dialog.error}",
+                  createdAt: DateTime.now()));
+        }
+      });
+    }
+  }
+
   void reload_model_from_file(String new_modelpath) async {
     setState(() {
+      _initialized = false;
       _messages = [
         ChatMessage(
             user: user_SYSTEM,
@@ -237,9 +320,12 @@ class _MyHomePageState extends State<MyHomePage> {
       ];
     });
 
-    await Future.delayed(const Duration(milliseconds: 1000));
-
-    dialog.reinit(modelpath: new_modelpath);
+    dialog.reinit(
+        modelpath: new_modelpath,
+        llama_init_json: llama_init_json,
+        onInitDone: () {
+          unlock_actions();
+        });
     reset_msgs();
   }
 
@@ -276,7 +362,7 @@ class _MyHomePageState extends State<MyHomePage> {
           title: Text(widget.title),
           actions: <Widget>[
             IconButton(
-              icon: Icon(
+              icon: const Icon(
                 Icons.sync_alt,
                 color: Colors.white,
               ),
@@ -297,7 +383,7 @@ class _MyHomePageState extends State<MyHomePage> {
               },
             ),
             IconButton(
-              icon: Icon(
+              icon: const Icon(
                 Icons.restart_alt,
                 color: Colors.white,
               ),
@@ -307,20 +393,23 @@ class _MyHomePageState extends State<MyHomePage> {
               },
             ),
             IconButton(
-              icon: Icon(
+              icon: const Icon(
                 Icons.ios_share,
                 color: Colors.white,
               ),
               onPressed: () {
                 FlutterClipboard.copy(serialize_msgs());
 
-                final snackBar = SnackBar(
-                  content: const Text('Conversation copied to clipboard'),
+                const snackBar = SnackBar(
+                  content: Text('Conversation copied to clipboard'),
                 );
 
                 // Find the ScaffoldMessenger in the widget tree
                 // and use it to show a SnackBar.
                 ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                Timer(Duration(milliseconds: 500), () {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                });
               },
             )
           ],
@@ -346,12 +435,15 @@ class _MyHomePageState extends State<MyHomePage> {
           children: <Widget>[
             Expanded(
               child: DashChat(
-                inputOptions: const InputOptions(
+                inputOptions: InputOptions(
                   sendOnEnter: false,
+                  sendOnShiftEnter: true,
                   alwaysShowSend: true,
                   inputToolbarMargin: EdgeInsets.all(8.0),
+                  inputDisabled: !(_initialized ?? false),
                 ),
                 messageOptions: MessageOptions(
+                    messageTextBuilder: customMessageTextBuilder,
                     showCurrentUserAvatar: false,
                     showOtherUsersAvatar: false,
                     onLongPressMessage: (m) {
@@ -364,6 +456,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       ScaffoldMessenger.of(context).showSnackBar(snackBar);
                     }),
                 currentUser: user,
+                typingUsers: _typingUsers,
                 onSend: (ChatMessage m) {
                   print("NEW MSG: ${m.text}");
                   addMsg(m);

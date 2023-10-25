@@ -32,6 +32,30 @@ class LLamaRPC {
           'init');
   late final _init = _initPtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
+  void init_async(
+    ffi.Pointer<ffi.Char> cmd,
+  ) {
+    return _init_async(
+      cmd,
+    );
+  }
+
+  late final _init_asyncPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Char>)>>(
+          'init_async');
+  late final _init_async =
+      _init_asyncPtr.asFunction<void Function(ffi.Pointer<ffi.Char>)>();
+
+  ffi.Pointer<ffi.Char> poll_system_status() {
+    return _poll_system_status();
+  }
+
+  late final _poll_system_statusPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Char> Function()>>(
+          'poll_system_status');
+  late final _poll_system_status =
+      _poll_system_statusPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
+
   ffi.Pointer<ffi.Char> json_rpc(
     ffi.Pointer<ffi.Char> method,
     ffi.Pointer<ffi.Char> path,

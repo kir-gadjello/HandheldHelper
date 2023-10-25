@@ -44,8 +44,9 @@ dependencies:
       url: ./libraries/dash_chat2
       ref: customizations # branch name
   async: ^2.11.0
-  isolate_rpc: ^1.1.4
-  isolate_handler: ^1.0.2
+  flutter_markdown: ^0.6.18
+  markdown_viewer: ^0.6.2
+  flutter_prism: ^0.2.2
 
 dev_dependencies:
   ffigen: ^9.0.1
