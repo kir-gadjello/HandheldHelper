@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
@@ -7,13 +8,16 @@ import 'package:clipboard/clipboard.dart';
 import 'conv.dart';
 
 /* TODO
+ [] async exec
  [] android version
  [] msg logging & search
  [] tab-like icon lists left and right of the title
  [] markdown or similar highlight in msgs
  [] send by Shift+Enter https://gist.github.com/elliette/d31aec75e000b3e2497a10d61bc6da0c https://api.flutter.dev/flutter/services/LogicalKeyboardKey-class.html
  [] support casualllm-14b
+ [] python interpreter (desktops?) https://pub.dev/packages/serious_python https://pub.dev/packages/dartpy https://pub.dev/packages/python_ffi
  [] disable excessive llama.cpp logs
+ [] web access with https://github.com/mozilla/readability & webview
  */
 
 final ChatUser user_SYSTEM = ChatUser(
@@ -31,8 +35,23 @@ final ChatUser user_ai = ChatUser(
   firstName: 'AI',
 );
 
-void main(List<String> args) {
+void main(List<String> args) async {
   print("CMD ARGS: ${args.join(',')}");
+
+  // var (isolate, isolateToMainStream) = await spawnIsolate();
+  //
+  // // Send a command to the isolate
+  // isolate.send({'command': 'compute', 'value': 10});
+  //
+  // // Listen for results from the isolate
+  // ReceivePort mainToIsolateStream = ReceivePort();
+  // isolate.addOnExitListener(mainToIsolateStream.sendPort, response: 'done');
+  // mainToIsolateStream.listen((message) {
+  //   if (message is int) {
+  //     print('Received result: $message');
+  //   }
+  // });
+
   runApp(const MyApp());
 }
 

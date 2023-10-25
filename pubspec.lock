@@ -26,7 +26,7 @@ packages:
     source: hosted
     version: "2.4.2"
   async:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: async
       sha256: "947bfcf187f74dbc5e146c9eb9c0f10c9f8b30743e341481c1e2ed3ecc18c20c"
@@ -305,6 +305,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.4"
+  isolate_rpc:
+    dependency: "direct main"
+    description:
+      name: isolate_rpc
+      sha256: f1af84ecc75b3a2e2228e3bd07406a879ecaea0651eace9dcfae5589ddae47da
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.4"
   js:
     dependency: transitive
     description:

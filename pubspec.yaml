@@ -43,6 +43,8 @@ dependencies:
     git:
       url: ./libraries/dash_chat2
       ref: customizations # branch name
+  async: ^2.11.0
+  isolate_rpc: ^1.1.4
 
 dev_dependencies:
   ffigen: ^9.0.1
