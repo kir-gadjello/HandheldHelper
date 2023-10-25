@@ -24,7 +24,7 @@ class LLAMAChatCompletion {
   List<String> stop;
 
   LLAMAChatCompletion(this.prompt, {
-    this.max_tokens = 512,
+    this.max_tokens = 1280,
     this.temperature = 0.0,
     this.stop = _IM_END_,
   });

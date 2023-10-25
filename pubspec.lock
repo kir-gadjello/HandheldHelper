@@ -166,7 +166,7 @@ packages:
     description:
       path: "."
       ref: customizations
-      resolved-ref: fe898af8ef0305771014ad252b7dc51423500a55
+      resolved-ref: f2a87c443d96e3778f0faf40ad3174672d8aa683
       url: "libraries/dash_chat2"
     source: git
     version: "0.0.19"

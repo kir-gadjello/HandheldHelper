@@ -23,36 +23,6 @@ import 'conv.dart';
  [] web access with https://github.com/mozilla/readability & webview
  */
 
-class MyTextField extends StatefulWidget {
-  @override
-  _MyTextFieldState createState() => _MyTextFieldState();
-}
-
-class _MyTextFieldState extends State<MyTextField> {
-  final TextEditingController _controller = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    return RawKeyboardListener(
-      focusNode: FocusNode(),
-      onKey: (RawKeyEvent event) {
-        if (event.isShiftPressed &&
-            event.logicalKey == LogicalKeyboardKey.enter) {
-          // Handle the Shift + Enter key combination
-          print('Shift + Enter pressed');
-          // Add your event handling code here
-        }
-      },
-      child: TextField(
-        controller: _controller,
-        decoration: InputDecoration(
-          hintText: 'Enter text',
-        ),
-      ),
-    );
-  }
-}
-
 final ChatUser user_SYSTEM = ChatUser(
   id: '0',
   firstName: 'SYSTEM',
@@ -80,7 +50,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var colorScheme = ColorScheme.fromSeed(
-        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade50);
+        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
 
     return MaterialApp(
       title: 'Handheld Helper',
@@ -436,6 +406,7 @@ class _MyHomePageState extends State<MyHomePage> {
             Expanded(
               child: DashChat(
                 inputOptions: InputOptions(
+                  // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
                   sendOnEnter: false,
                   sendOnShiftEnter: true,
                   alwaysShowSend: true,
