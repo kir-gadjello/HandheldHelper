@@ -125,6 +125,22 @@ class AIChatPollResult {
   }
 }
 
+class Tokenized {
+  bool success = false;
+  List<String> tokens = [];
+  int length = -1;
+
+  Tokenized();
+
+  Tokenized.fromJson(Map<String, dynamic> data) {
+    success = data['success'] ?? false;
+    length = data['length'] ?? -1;
+    if (data['tokens'] != null) {
+      tokens = List<String>.from(data['tokens']);
+    }
+  }
+}
+
 String mergeAIChatPollResults(List<AIChatPollResult> updates, {sep = ""}) {
   return updates.map((u) => u.joined(sep: sep)).join(sep);
 }
@@ -139,6 +155,8 @@ class AIDialog {
   bool streaming = false;
   String stream_msg_acc = "";
   Function? onInitDone = null;
+  int tokens_used = 0;
+  int n_ctx = 0;
 
   AIDialogSTATE state = AIDialogSTATE.NOT_INITIALIZED;
 
@@ -172,6 +190,28 @@ class AIDialog {
     // print("LOG sysinfo: $sysinfo");
   }
 
+  void _sync_token_count() {
+    if (initialized) {
+      var tok = tokenize(format_chatml(msgs));
+      if (tok.success) {
+        tokens_used = tok.length;
+      }
+    }
+  }
+
+  int measure_tokens(String s) {
+    if (s.isEmpty) {
+      return 0;
+    }
+    if (initialized) {
+      var tok = tokenize(s);
+      if (tok.success) {
+        return tok.length;
+      }
+    }
+    return 0;
+  }
+
   bool reinit({String? system_message, required String modelpath, non_blocking = true, Map<String, dynamic>? llama_init_json, onInitDone}) {
     if (state == AIDialogSTATE.INITIALIZED_SUCCESS) {
       teardown();
@@ -188,6 +228,7 @@ class AIDialog {
     try {
       if (this.system_message.isNotEmpty) {
         msgs.add(AIChatMessage("system", this.system_message));
+        _sync_token_count();
         if (kDebugMode) {
           print("Using system prompt: \"${this.system_message}\"");
         }
@@ -210,6 +251,8 @@ class AIDialog {
         if (modelpath.toLowerCase().contains("mistral") && init_json['n_ctx'] == null) {
           init_json['n_ctx'] = 8192;
         }
+
+        n_ctx = init_json['n_ctx'] ?? 512;
 
         rpc.init_async(jsonEncode(init_json).toNativeUtf8().cast<ffi.Char>());
 
@@ -252,10 +295,31 @@ class AIDialog {
     msgs = [];
     if (system_message.isNotEmpty) {
       msgs.add(AIChatMessage("system", system_message));
+      _sync_token_count();
       if (kDebugMode) {
         print("Using system prompt: \"${system_message}\"");
       }
     }
+  }
+
+  _on_advance_resp(String api_resp) {
+    var jdata = jsonDecode(api_resp);
+    if (jdata["prompt_stats"] != null) {
+      Map<String, dynamic> prompt_stats = jdata["prompt_stats"];
+      // print("LOG PROMPT STATS: $prompt_stats");
+      tokens_used = (prompt_stats['total_prompt_tokens'] ?? 0) as int;
+      int n_ctx = (prompt_stats['n_ctx'] ?? 0) as int;
+      // print("LOG TOKENS USED: $tokens_used of $n_ctx");
+    }
+  }
+
+  Tokenized tokenize(String s) {
+    final api_resp = rpc
+        .tokenize(jsonEncode({"text":s}).toNativeUtf8().cast<ffi.Char>())
+        .cast<Utf8>()
+        .toDartString();
+
+    return Tokenized.fromJson(jsonDecode(api_resp));
   }
 
   bool advance({String? user_msg, bool fix_chatml = true}) {
@@ -282,6 +346,8 @@ class AIDialog {
           .get_completion(api_query.toNativeUtf8().cast<ffi.Char>())
           .cast<Utf8>()
           .toDartString();
+
+      _on_advance_resp(api_resp);
 
       if (__DEBUG) print("RESPONSE: $api_resp");
 
@@ -327,6 +393,8 @@ class AIDialog {
           .async_completion_init(api_query.toNativeUtf8().cast<ffi.Char>())
           .cast<Utf8>()
           .toDartString();
+
+      _on_advance_resp(api_resp);
 
       if (__DEBUG) print("RESPONSE: $api_resp");
 

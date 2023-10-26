@@ -39,7 +39,10 @@ final ChatUser user_ai = ChatUser(
 );
 
 void main(List<String> args) async {
-  print("CMD ARGS: ${args.join(',')}");
+  if ((Platform.environment["DEBUG"] ?? "").isNotEmpty) {
+    dlog = print;
+  }
+  dlog("CMD ARGS: ${args.join(',')}");
   runApp(const MyApp());
 }
 
@@ -99,25 +102,25 @@ class MyHomePage extends StatefulWidget {
 
 String resolve_llm_file() {
   var s = String.fromEnvironment("MODELPATH") ?? "";
-  print("MODEL: probing $s");
+  dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
     return s;
   }
 
   s = Platform.environment["MODELPATH"] ?? "";
-  print("MODEL: probing $s");
+  dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
     return s;
   }
 
   s = "./openhermes-2-mistral-7b.Q4_K_M.gguf";
-  print("MODEL: probing $s");
+  dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
     return s;
   }
 
   s = "/Users/LKE/projects/AI/openhermes-2-mistral-7b.Q4_K_M.gguf";
-  print("MODEL: probing $s");
+  dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
     return s;
   }
@@ -150,13 +153,15 @@ Map<String, dynamic> resolve_init_json() {
   }
 
   s = "./llama_init.json";
-  print("MODEL: probing $s");
+  dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
     return jsonDecode(File(s).readAsStringSync());
   }
 
   return {};
 }
+
+void Function(Object?) dlog = (Object? args) {};
 
 class _MyHomePageState extends State<MyHomePage> {
   late AIDialog dialog;
@@ -168,6 +173,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Timer? _msg_poll_timer;
   Settings settings = Settings();
   bool _initialized = false;
+  Timer? _token_counter_sync;
+  int _input_tokens = 0;
 
   Map<String, dynamic> llama_init_json = {};
 
@@ -179,7 +186,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   _MyHomePageState() {
     llama_init_json = resolve_init_json();
-    print("LLAMA_INIT_JSON: ${llama_init_json}");
+    dlog("LLAMA_INIT_JSON: ${llama_init_json}");
     dialog = AIDialog(
         system_message: hermes_sysmsg,
         libpath: "librpcserver.dylib",
@@ -201,7 +208,8 @@ class _MyHomePageState extends State<MyHomePage> {
     _messages = [
       ChatMessage(
         text:
-            "Beginning of conversation with model at ${dialog.modelpath}\nSystem prompt: $hermes_sysmsg",
+        "Beginning of conversation with model at ${dialog
+            .modelpath}\nSystem prompt: $hermes_sysmsg",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
       ),
@@ -265,7 +273,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   user: user_ai,
                   text: dialog.msgs.last.content,
                   createdAt: dialog.msgs.last.createdAt));
-          print("MSGS: ${_messages.map((m) => m.text)}");
+          dlog("MSGS: ${_messages.map((m) => m.text)}");
         } else {
           _messages.insert(0, m);
           _messages.insert(
@@ -301,15 +309,23 @@ class _MyHomePageState extends State<MyHomePage> {
 
   String serialize_msgs() {
     List<Map<String, String>> export_msgs =
-        List.from(_messages.reversed.map((e) => <String, String>{
-              'user': e.user.getFullName(),
-              'text': e.text.toString(),
-              'createdAt': e.createdAt.toString()
-            }));
+    List.from(_messages.reversed.map((e) =>
+    <String, String>{
+      'user': e.user.getFullName(),
+      'text': e.text.toString(),
+      'createdAt': e.createdAt.toString()
+    }));
     const JsonEncoder encoder = JsonEncoder.withIndent('  ');
     return encoder.convert({
       'meta': {'model': dialog.modelpath},
       'messages': export_msgs
+    });
+  }
+
+  void _update_token_counter(String upd) {
+    setState(() {
+      _input_tokens = dialog.measure_tokens(upd);
+      dlog("LOG _update_token_counter $_input_tokens");
     });
   }
 
@@ -321,53 +337,75 @@ class _MyHomePageState extends State<MyHomePage> {
     // The Flutter framework has been optimized to make rerunning build methodsdf
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
+
+    bool actionsEnabled = _initialized && !_msg_streaming;
+    const Color disabledColor = Colors.white60;
+    Color iconColor = actionsEnabled ? Colors.white : disabledColor;
+
+    const Color warningColor = Colors.deepOrangeAccent;
+    bool tokenOverload = (dialog.tokens_used + _input_tokens) >= dialog.n_ctx;
+
     return Scaffold(
       appBar: AppBar(
-          // TRY THIS: Try changing the color here to a specific color (to
-          // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-          // change color while the other colors stay the same.
-          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        // TRY THIS: Try changing the color here to a specific color (to
+        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
+        // change color while the other colors stay the same.
+          backgroundColor: Theme
+              .of(context)
+              .colorScheme
+              .inversePrimary,
           // Here we take the value from the MyHomePage object that was created by
           // the App.build method, and use it to set our appbar title.
-          title: Text(widget.title),
+          title: Row(children: [
+            Expanded(child: Text("${widget.title})")),
+            Text(
+              "T:${dialog.tokens_used + _input_tokens}/${dialog.n_ctx}",
+              style: TextStyle(
+                  color: actionsEnabled ? (tokenOverload ? warningColor : Colors
+                      .white) : disabledColor),
+            )
+          ]),
           actions: <Widget>[
             IconButton(
-              icon: const Icon(
-                Icons.sync_alt,
-                color: Colors.white,
-              ),
-              onPressed: () async {
-                FilePickerResult? result =
-                    await FilePicker.platform.pickFiles();
+                disabledColor: disabledColor,
+                icon: Icon(
+                  Icons.sync_alt,
+                  color: iconColor,
+                ),
+                onPressed: actionsEnabled ? () async {
+                  FilePickerResult? result =
+                  await FilePicker.platform.pickFiles();
 
-                if (result != null) {
-                  File file = File(result.files.single.path ?? "");
-                  if (file.existsSync()) {
-                    var new_model = file.path;
-                    print("RELOADING FROM $new_model");
-                    reload_model_from_file(new_model);
+                  if (result != null) {
+                    File file = File(result.files.single.path ?? "");
+                    if (file.existsSync()) {
+                      var new_model = file.path;
+                      dlog("RELOADING FROM $new_model");
+                      reload_model_from_file(new_model);
+                    }
+                  } else {
+                    // User canceled the picker
                   }
-                } else {
-                  // User canceled the picker
-                }
-              },
+                } : null
             ),
             IconButton(
-              icon: const Icon(
+              disabledColor: disabledColor,
+              icon: Icon(
                 Icons.restart_alt,
-                color: Colors.white,
+                color: iconColor,
               ),
-              onPressed: () async {
+              onPressed: actionsEnabled ? () async {
                 dialog.reset_msgs();
                 reset_msgs();
-              },
+              } : null,
             ),
             IconButton(
-              icon: const Icon(
+              disabledColor: disabledColor,
+              icon: Icon(
                 Icons.ios_share,
-                color: Colors.white,
+                color: iconColor,
               ),
-              onPressed: () {
+              onPressed: actionsEnabled ? () {
                 FlutterClipboard.copy(serialize_msgs());
 
                 const snackBar = SnackBar(
@@ -380,7 +418,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 Timer(Duration(milliseconds: 500), () {
                   ScaffoldMessenger.of(context).hideCurrentSnackBar();
                 });
-              },
+              } : null,
             )
           ],
           toolbarHeight: 48.0),
@@ -407,11 +445,21 @@ class _MyHomePageState extends State<MyHomePage> {
               child: DashChat(
                 inputOptions: InputOptions(
                   // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
-                  sendOnEnter: false,
-                  sendOnShiftEnter: true,
-                  alwaysShowSend: true,
-                  inputToolbarMargin: EdgeInsets.all(8.0),
-                  inputDisabled: !(_initialized ?? false),
+                    sendOnEnter: false,
+                    sendOnShiftEnter: true,
+                    alwaysShowSend: true,
+                    inputToolbarMargin: EdgeInsets.all(8.0),
+                    inputDisabled: !(_initialized ?? false),
+                    onTextChange: (String upd) {
+                      dlog("LOG onTextChange $upd");
+                      if (_token_counter_sync != null) {
+                        _token_counter_sync?.cancel();
+                      }
+                      _token_counter_sync =
+                          Timer(const Duration(milliseconds: 300), () {
+                            _update_token_counter(upd);
+                          });
+                    }
                 ),
                 messageOptions: MessageOptions(
                     messageTextBuilder: customMessageTextBuilder,
@@ -422,14 +470,16 @@ class _MyHomePageState extends State<MyHomePage> {
                       FlutterClipboard.copy(msg);
                       final snackBar = SnackBar(
                         content: Text(
-                            "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard"),
+                            "Message \"${truncateWithEllipsis(
+                                16, msg)}\" copied to clipboard"),
                       );
                       ScaffoldMessenger.of(context).showSnackBar(snackBar);
                     }),
                 currentUser: user,
                 typingUsers: _typingUsers,
                 onSend: (ChatMessage m) {
-                  print("NEW MSG: ${m.text}");
+                  dlog("NEW MSG: ${m.text}");
+                  _input_tokens = 0;
                   addMsg(m);
                 },
                 messages: _messages,

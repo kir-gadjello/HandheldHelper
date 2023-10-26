@@ -46,6 +46,20 @@ class LLamaRPC {
   late final _init_async =
       _init_asyncPtr.asFunction<void Function(ffi.Pointer<ffi.Char>)>();
 
+  ffi.Pointer<ffi.Char> tokenize(
+    ffi.Pointer<ffi.Char> req_json,
+  ) {
+    return _tokenize(
+      req_json,
+    );
+  }
+
+  late final _tokenizePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>>('tokenize');
+  late final _tokenize = _tokenizePtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
   ffi.Pointer<ffi.Char> poll_system_status() {
     return _poll_system_status();
   }
@@ -55,34 +69,6 @@ class LLamaRPC {
           'poll_system_status');
   late final _poll_system_status =
       _poll_system_statusPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
-
-  ffi.Pointer<ffi.Char> json_rpc(
-    ffi.Pointer<ffi.Char> method,
-    ffi.Pointer<ffi.Char> path,
-    ffi.Pointer<ffi.Char> headers,
-    ffi.Pointer<ffi.Char> body,
-  ) {
-    return _json_rpc(
-      method,
-      path,
-      headers,
-      body,
-    );
-  }
-
-  late final _json_rpcPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<ffi.Char> Function(
-              ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('json_rpc');
-  late final _json_rpc = _json_rpcPtr.asFunction<
-      ffi.Pointer<ffi.Char> Function(
-          ffi.Pointer<ffi.Char>,
-          ffi.Pointer<ffi.Char>,
-          ffi.Pointer<ffi.Char>,
-          ffi.Pointer<ffi.Char>)>();
 
   ffi.Pointer<ffi.Char> get_completion(
     ffi.Pointer<ffi.Char> req_json,
@@ -127,6 +113,21 @@ class LLamaRPC {
           ffi.Pointer<ffi.Char> Function(
               ffi.Pointer<ffi.Char>)>>('async_completion_poll');
   late final _async_completion_poll = _async_completion_pollPtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
+  ffi.Pointer<ffi.Char> async_completion_cancel(
+    ffi.Pointer<ffi.Char> req_json,
+  ) {
+    return _async_completion_cancel(
+      req_json,
+    );
+  }
+
+  late final _async_completion_cancelPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(
+              ffi.Pointer<ffi.Char>)>>('async_completion_cancel');
+  late final _async_completion_cancel = _async_completion_cancelPtr
       .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
 
   void deinit() {

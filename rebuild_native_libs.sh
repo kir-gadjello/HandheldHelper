@@ -19,5 +19,6 @@ cp ./ggml-metal.metal ../handheld_helper/native/
 cd ../handheld_helper;
 cp native/ggml-metal.metal macos/Runner/
 cp native/*.dylib macos/Runner/
+cp native/*.dylib .
 
 flutter pub run ffigen;
