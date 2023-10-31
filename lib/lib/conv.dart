@@ -1,6 +1,7 @@
 import 'dart:convert' show jsonEncode, jsonDecode;
 import 'dart:ffi' as ffi;
-import 'dart:io' show File;
+import 'dart:io' show File, Directory, Platform;
+import 'package:path/path.dart' as Path;
 import 'dart:collection';
 import 'package:ffi/ffi.dart';
 import 'dart:isolate';
@@ -23,14 +24,14 @@ class LLAMAChatCompletion {
   double temperature;
   List<String> stop;
 
-  LLAMAChatCompletion(this.prompt, {
+  LLAMAChatCompletion(
+    this.prompt, {
     this.max_tokens = 1280,
     this.temperature = 0.0,
     this.stop = _IM_END_,
   });
 
-  Map<String, dynamic> toJson() =>
-      {
+  Map<String, dynamic> toJson() => {
         'prompt': prompt,
         'n_predict': max_tokens,
         'temperature': temperature,
@@ -145,13 +146,63 @@ String mergeAIChatPollResults(List<AIChatPollResult> updates, {sep = ""}) {
   return updates.map((u) => u.joined(sep: sep)).join(sep);
 }
 
+String? resolve_shared_library_path(String libname) {
+  var binDir = Path.dirname(Platform.resolvedExecutable);
+  // Define possible system directories where shared libraries can be located
+  List<String> directories = [
+    binDir,
+    Path.join(binDir, "../Frameworks")
+    // '/usr/lib',
+    // '/usr/lib64',
+    // '/usr/local/lib',
+    // Add other directories as needed
+  ];
+
+  // Define standard shared library extensions for different operating systems
+  Map<String, String> extensions = {
+    'linux': '.so',
+    'macos': '.dylib',
+    'android': '.so',
+  };
+
+  // Get the current operating system
+  String os = Platform.operatingSystem;
+
+  // Get the standard extension for the current operating system
+  String extension = extensions?[os] ?? ".so";
+
+  // Iterate over the directories
+  for (String directory in directories) {
+    // Construct the full file path with the extension
+    String filePath = Path.join(directory, "$libname$extension");
+    // Check if the file exists
+    if (File(filePath).existsSync()) {
+      // If the file exists, return its path
+      print('Found $libname at $filePath');
+      return filePath;
+    } else {
+      // If the file doesn't exist, log the file probing attempt
+      print('Checked $filePath but did not find $libname');
+    }
+  }
+
+  // If the file was not found in any of the directories, return null
+  print('Did not find $libname in any of the checked directories');
+
+  return null;
+}
+
+const LIBLLAMARPC = "librpcserver";
+
 class AIDialog {
   String system_message = "";
-  String libpath = "$LLAMA_SO";
+  String? libpath = "$LLAMA_SO";
   String modelpath = "";
   String error = "";
 
   bool initialized = false;
+  bool postpone_init = false;
+  bool init_postponed = false;
   bool streaming = false;
   String stream_msg_acc = "";
   Function? onInitDone = null;
@@ -162,26 +213,49 @@ class AIDialog {
 
   List<AIChatMessage> msgs = [];
 
-  Map<String,dynamic>? llama_init_json;
+  Map<String, dynamic>? llama_init_json;
 
   late binding.LLamaRPC rpc;
 
-  AIDialog({this.system_message = "", this.libpath = "", this.modelpath = "", this.onInitDone, this.llama_init_json}) {
-    rpc = binding.LLamaRPC(ffi.DynamicLibrary.open(libpath));
+  AIDialog(
+      {this.postpone_init = false,
+      this.system_message = "",
+      this.libpath,
+      this.modelpath = "",
+      this.onInitDone,
+      this.llama_init_json}) {
+    if (libpath != null && File(libpath!).existsSync()) {
+    } else {
+      this.libpath = resolve_shared_library_path(LIBLLAMARPC);
+      if (this.libpath == null) {
+        throw Exception("LLAMARPC: Cannot find shared library $LIBLLAMARPC");
+      }
+    }
 
-    if (!File(this.modelpath).existsSync()) {
-      print("Avoiding init due to invalid modelpath");
+    rpc = binding.LLamaRPC(ffi.DynamicLibrary.open(this.libpath!));
+
+    if (postpone_init) {
+      print("Avoiding init due to parent request");
+      init_postponed = true;
       return;
     }
 
-    reinit(system_message: system_message, modelpath: modelpath, onInitDone: onInitDone, llama_init_json: llama_init_json);
+    if (!File(this.modelpath).existsSync()) {
+      print("Avoiding init due to invalid modelpath");
+      init_postponed = true;
+      return;
+    }
+
+    reinit(
+        system_message: system_message,
+        modelpath: modelpath,
+        onInitDone: onInitDone,
+        llama_init_json: llama_init_json);
   }
 
   void poll_init() {
     var sysinfo = Map<String, dynamic>.from(
-        jsonDecode(rpc.poll_system_status()
-        .cast<Utf8>()
-        .toDartString()));
+        jsonDecode(rpc.poll_system_status().cast<Utf8>().toDartString()));
 
     if (sysinfo['init_success'] == 1) {
       initialized = true;
@@ -212,7 +286,12 @@ class AIDialog {
     return 0;
   }
 
-  bool reinit({String? system_message, required String modelpath, non_blocking = true, Map<String, dynamic>? llama_init_json, onInitDone}) {
+  bool reinit(
+      {String? system_message,
+      required String modelpath,
+      non_blocking = true,
+      Map<String, dynamic>? llama_init_json,
+      onInitDone}) {
     if (state == AIDialogSTATE.INITIALIZED_SUCCESS) {
       teardown();
     }
@@ -239,16 +318,16 @@ class AIDialog {
       var t0 = DateTime.now();
 
       if (non_blocking) {
-
-        Map<String,dynamic> init_json = {"model": modelpath};
+        Map<String, dynamic> init_json = {"model": modelpath};
 
         if (llama_init_json != null) {
-          llama_init_json.forEach((k,v) {
+          llama_init_json.forEach((k, v) {
             init_json[k] = v;
           });
         }
 
-        if (modelpath.toLowerCase().contains("mistral") && init_json['n_ctx'] == null) {
+        if (modelpath.toLowerCase().contains("mistral") &&
+            init_json['n_ctx'] == null) {
           init_json['n_ctx'] = 8192;
         }
 
@@ -268,7 +347,8 @@ class AIDialog {
         });
       } else {
         initialized = (rpc.init(
-            "{\"model\":\"$modelpath\"}".toNativeUtf8().cast<ffi.Char>()) == 0  );
+                "{\"model\":\"$modelpath\"}".toNativeUtf8().cast<ffi.Char>()) ==
+            0);
         print("INITIALIZED: $initialized");
         if (initialized) {
           if (onInitDone != null) {
@@ -279,7 +359,8 @@ class AIDialog {
 
       if (kDebugMode) {
         print("[OK] Loaded model... $modelpath");
-        print("--------------------------------------------------\nChat mode: ON");
+        print(
+            "--------------------------------------------------\nChat mode: ON");
       }
     } catch (e) {
       state = AIDialogSTATE.INITIALIZED_FAILURE;
@@ -315,7 +396,7 @@ class AIDialog {
 
   Tokenized tokenize(String s) {
     final api_resp = rpc
-        .tokenize(jsonEncode({"text":s}).toNativeUtf8().cast<ffi.Char>())
+        .tokenize(jsonEncode({"text": s}).toNativeUtf8().cast<ffi.Char>())
         .cast<Utf8>()
         .toDartString();
 

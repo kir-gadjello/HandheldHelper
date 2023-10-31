@@ -47,6 +47,15 @@ dependencies:
   flutter_markdown: ^0.6.18
   markdown_viewer: ^0.6.2
   flutter_prism: ^0.2.2
+  path_provider: ^2.1.1
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0+2
+  uuid: ^4.1.0
+  flutter_downloader: ^1.11.4
+  dio: ^5.3.3
+  permission_handler: ^11.0.1
+  flutter_fast_forms: ^12.0.0
+  getwidget: ^4.0.0
 
 dev_dependencies:
   ffigen: ^9.0.1
