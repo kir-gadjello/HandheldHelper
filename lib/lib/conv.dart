@@ -201,6 +201,7 @@ class AIDialog {
   String error = "";
 
   bool initialized = false;
+  bool init_in_progress = false;
   bool postpone_init = false;
   bool init_postponed = false;
   bool streaming = false;
@@ -333,11 +334,14 @@ class AIDialog {
 
         n_ctx = init_json['n_ctx'] ?? 512;
 
+        init_in_progress = true;
+
         rpc.init_async(jsonEncode(init_json).toNativeUtf8().cast<ffi.Char>());
 
         Timer.periodic(Duration(milliseconds: 250), (timer) {
           poll_init();
           if (initialized) {
+            init_in_progress = false;
             print("Init complete at ${DateTime.now()}");
             timer.cancel();
             if (onInitDone != null) {
