@@ -406,26 +406,56 @@ class DatabaseHelper {
       )
     ''');
 
-// Create virtual table, indices, and triggers for fulltext search
     await db.execute('''
-      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(message)
+     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts4(message)
     ''');
+
     await db.execute('''
-      CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
-        INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
-      END
+     CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+       INSERT INTO messages_fts(rowid, message) SELECT new.rowid, new.message;
+     END
     ''');
+
+    // await db.execute('''
+    //  CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+    //    DELETE FROM messages_fts WHERE rowid = old.rowid;
+    //    INSERT INTO messages_fts(rowid, message) SELECT new.rowid, new.message;
+    //  END
+    // ''');
+
     await db.execute('''
-      CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
-        INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
-      END
+    CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.rowid;
+    INSERT OR IGNORE INTO messages_fts(rowid, message) VALUES(new.rowid, new.message);
+    END
     ''');
+
     await db.execute('''
-      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
-      END
+     CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+       DELETE FROM messages_fts WHERE rowid = old.rowid;
+     END
     ''');
+
+    // // Create virtual table, indices, and triggers for fulltext search
+//     await db.execute('''
+//       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(message)
+//     ''');
+//     await db.execute('''
+//       CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+//         INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
+//       END
+//     ''');
+//     await db.execute('''
+//       CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+//         INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
+//         INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
+//       END
+//     ''');
+//     await db.execute('''
+//       CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+//         INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
+//       END
+//     ''');
 
 // Create "chats" table
     await db.execute('''
@@ -560,12 +590,12 @@ class ChatManager {
     final db = await _databaseHelper.database;
 
     final List<Map<String, dynamic>> results = await db.rawQuery('''
-    SELECT messages.uuid AS msg_uuid, chats.uuid AS chat_uuid 
-    FROM messages_fts 
-    JOIN messages ON messages_fts.rowid = messages.rowid 
-    JOIN chats ON messages.chat_uuid = chats.uuid 
-    WHERE messages_fts MATCH ?
-  ''', [substring]);
+       SELECT messages.uuid AS msg_uuid, chats.uuid AS chat_uuid 
+       FROM messages_fts 
+       JOIN messages ON messages_fts.rowid = messages.rowid 
+       JOIN chats ON messages.chat_uuid = chats.uuid 
+       WHERE messages_fts MATCH ?
+      ''', [substring]);
 
     if (results.isEmpty) {
       return [];

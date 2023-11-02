@@ -56,6 +56,7 @@ dependencies:
   permission_handler: ^11.0.1
   flutter_fast_forms: ^12.0.0
   getwidget: ^4.0.0
+  external_path: ^1.0.3
 
 dev_dependencies:
   ffigen: ^9.0.1

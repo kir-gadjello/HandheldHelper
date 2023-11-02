@@ -1,6 +1,6 @@
 import 'dart:convert' show jsonEncode, jsonDecode;
 import 'dart:ffi' as ffi;
-import 'dart:io' show File, Directory, Platform;
+import 'dart:io' show File, Directory, Platform, FileSystemEntity;
 import 'package:path/path.dart' as Path;
 import 'dart:collection';
 import 'package:ffi/ffi.dart';
@@ -146,15 +146,44 @@ String mergeAIChatPollResults(List<AIChatPollResult> updates, {sep = ""}) {
   return updates.map((u) => u.joined(sep: sep)).join(sep);
 }
 
+void printTree(Directory dir, [int depth = 0]) {
+  if (depth > 100) return; // Max depth of 100 files
+
+  List<FileSystemEntity> entities = [];
+  try {
+    entities = dir.listSync().toList();
+  } catch (e) {
+    print("Exception for $dir: $e");
+  }
+  for (var entity in (entities ?? [])) {
+    if (entity is Directory) {
+      print('${'\t' * depth}Directory: ${entity.path}');
+      printTree(entity, depth + 1);
+    } else if (entity is File) {
+      print('${'\t' * depth}File: ${entity.path}');
+    }
+  }
+}
+
 String? resolve_shared_library_path(String libname) {
   var binDir = Path.dirname(Platform.resolvedExecutable);
+  print("resolve_shared_library_path $binDir $libname");
+  // print("FILES: ");
+  // printTree(Directory.current);
+
   // Define possible system directories where shared libraries can be located
   List<String> directories = [
+    "",
     binDir,
-    Path.join(binDir, "../Frameworks")
-    // '/usr/lib',
-    // '/usr/lib64',
-    // '/usr/local/lib',
+    'lib/arm64-v8a/',
+    'arm64-v8a/',
+    Path.join(binDir, 'lib/arm64-v8a/'),
+    Path.join(binDir, "../Frameworks/"),
+    Path.join(binDir, 'lib/'),
+    Path.join(binDir, 'lib64/'),
+    '/usr/lib/',
+    '/usr/lib64/',
+    '/usr/local/lib/',
     // Add other directories as needed
   ];
 
@@ -171,10 +200,16 @@ String? resolve_shared_library_path(String libname) {
   // Get the standard extension for the current operating system
   String extension = extensions?[os] ?? ".so";
 
+  if (File("$libname$extension").existsSync()) {
+    print("FOUND! $libname$extension");
+    return "$libname$extension";
+  }
+
   // Iterate over the directories
   for (String directory in directories) {
     // Construct the full file path with the extension
     String filePath = Path.join(directory, "$libname$extension");
+    print('Probing $libname at $filePath');
     // Check if the file exists
     if (File(filePath).existsSync()) {
       // If the file exists, return its path
@@ -225,16 +260,32 @@ class AIDialog {
       this.modelpath = "",
       this.onInitDone,
       this.llama_init_json}) {
+    String _libpath;
+
     if (libpath != null && File(libpath!).existsSync()) {
+      _libpath = libpath!;
     } else {
-      this.libpath = resolve_shared_library_path(LIBLLAMARPC);
-      if (this.libpath == null) {
-        throw Exception("LLAMARPC: Cannot find shared library $LIBLLAMARPC");
+      if (Platform.isAndroid) {
+        _libpath = "$LIBLLAMARPC.so";
+      } else {
+        _libpath =
+            resolve_shared_library_path(LIBLLAMARPC) ?? "$LIBLLAMARPC.so";
       }
     }
 
-    rpc = binding.LLamaRPC(ffi.DynamicLibrary.open(this.libpath!));
+    if (!Platform.isAndroid &&
+        (_libpath == null || !File(_libpath).existsSync())) {
+      throw Exception("LLAMARPC: Cannot find shared library $LIBLLAMARPC");
+    }
 
+    libpath = _libpath;
+
+    rpc = binding.LLamaRPC(
+        ffi.DynamicLibrary.open(_libpath ?? "librpcserver.so"));
+
+    if (kDebugMode && rpc != null) {
+      print("[OK] Loaded shared library... $libpath");
+    }
     if (postpone_init) {
       print("Avoiding init due to parent request");
       init_postponed = true;
@@ -260,9 +311,12 @@ class AIDialog {
 
     if (sysinfo['init_success'] == 1) {
       initialized = true;
+    } else if (sysinfo['init_success'] == -1) {
+      initialized = false;
+      state = AIDialogSTATE.INITIALIZED_FAILURE;
     }
 
-    // print("LOG sysinfo: $sysinfo");
+    print("LOG sysinfo: $sysinfo");
   }
 
   void _sync_token_count() {
@@ -314,25 +368,30 @@ class AIDialog {
         }
       }
 
-      if (kDebugMode) print("[OK] Loaded library... $LLAMA_SO");
-
       var t0 = DateTime.now();
 
+      Map<String, dynamic> init_json = {
+        "model": modelpath,
+        "use_mmap": false,
+        "use_mlock": false
+      };
+
+      if (llama_init_json != null) {
+        llama_init_json.forEach((k, v) {
+          init_json[k] = v;
+        });
+      }
+
+      if (modelpath.toLowerCase().contains("mistral") &&
+          init_json['n_ctx'] == null) {
+        init_json['n_ctx'] = 8192;
+      }
+
       if (non_blocking) {
-        Map<String, dynamic> init_json = {"model": modelpath};
+        n_ctx = init_json['n_ctx'] ?? 1024;
 
-        if (llama_init_json != null) {
-          llama_init_json.forEach((k, v) {
-            init_json[k] = v;
-          });
-        }
-
-        if (modelpath.toLowerCase().contains("mistral") &&
-            init_json['n_ctx'] == null) {
-          init_json['n_ctx'] = 8192;
-        }
-
-        n_ctx = init_json['n_ctx'] ?? 512;
+        print("USING INIT PARAMS = $init_json");
+        print("USING CONTEXT LENGTH = $n_ctx");
 
         init_in_progress = true;
 
@@ -342,16 +401,22 @@ class AIDialog {
           poll_init();
           if (initialized) {
             init_in_progress = false;
+            state = AIDialogSTATE.INITIALIZED_SUCCESS;
             print("Init complete at ${DateTime.now()}");
+            print("[OK] Loaded model... $modelpath");
             timer.cancel();
             if (onInitDone != null) {
               onInitDone();
             }
           }
+          if (state == AIDialogSTATE.INITIALIZED_FAILURE) {
+            print("Init FAILED at ${DateTime.now()}");
+            timer.cancel();
+          }
         });
       } else {
         initialized = (rpc.init(
-                "{\"model\":\"$modelpath\"}".toNativeUtf8().cast<ffi.Char>()) ==
+                jsonEncode(init_json ?? {}).toNativeUtf8().cast<ffi.Char>()) ==
             0);
         print("INITIALIZED: $initialized");
         if (initialized) {
@@ -361,7 +426,7 @@ class AIDialog {
         }
       }
 
-      if (kDebugMode) {
+      if (!non_blocking && kDebugMode) {
         print("[OK] Loaded model... $modelpath");
         print(
             "--------------------------------------------------\nChat mode: ON");

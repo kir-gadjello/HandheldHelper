@@ -18,6 +18,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
+import 'package:external_path/external_path.dart';
 
 /* TODO
  [] async exec
@@ -457,11 +458,15 @@ class LLMref {
 
 const DEFAULT_LLM =
     "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf";
-// 'https://huggingface.co/roneneldan/TinyStories-3M/resolve/main/pytorch_model.bin';
-//"https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf";
 const DEFAULT_LLM_FILE = "openhermes-2-mistral-7b.Q4_K_M.gguf";
 const DEFAULT_LLM_NAME = "OpenHermes-2-Mistral-7B";
-const DEFAULT_LLM_SIZE = 4368450272; // 66708541; //4368450272;
+const DEFAULT_LLM_SIZE = 4368450272;
+
+// const DEFAULT_LLM =
+//     "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
+// const DEFAULT_LLM_FILE = "tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
+// const DEFAULT_LLM_NAME = "TinyLLAMA-1t-OpenOrca";
+// const DEFAULT_LLM_SIZE = 667814368;
 
 final defaultLLM = LLMref(
     sources: [DEFAULT_LLM], name: DEFAULT_LLM_NAME, size: DEFAULT_LLM_SIZE);
@@ -471,7 +476,22 @@ class HHHDefaults {
   final String llm_url;
   final String llm_filename;
   final int llm_size;
+
   HHHDefaults(this.hhh_dir, this.llm_url, this.llm_filename, this.llm_size);
+
+  Map<String, dynamic> toJson() {
+    return {
+      'hhh_dir': hhh_dir,
+      'llm_url': llm_url,
+      'llm_filename': llm_filename,
+      'llm_size': llm_size,
+    };
+  }
+
+  @override
+  String toString() {
+    return jsonEncode(toJson());
+  }
 }
 
 String attemptResolveSymlink(String p) {
@@ -555,7 +575,9 @@ bool validate_root_app_params(Map<String, dynamic> j) {
 class AppInitParams {
   RootAppParams? params;
   HHHDefaults defaults;
-  AppInitParams(this.defaults, {this.params});
+  bool storagePermissionGranted;
+  AppInitParams(this.defaults,
+      {this.params, this.storagePermissionGranted = false});
 }
 
 Future<AppInitParams> perform_app_init() async {
@@ -571,11 +593,41 @@ Future<AppInitParams> perform_app_init() async {
     //     .absolute
     //     .path; // Path.join(Platform.environment["HOME"] ?? "/home/user", "Documents/HHH");
   } else if (Platform.isAndroid) {
-    def_hhh_dir = Path.join("/storage/emulated/0/", "HHH");
+    print("Running Android...");
+    Directory? sdcard = await getExternalStorageDirectory();
+    List<Directory>? sdcard_dirs =
+        await getExternalStorageDirectories(type: StorageDirectory.downloads);
+    // List<String> sdcard_dirs = await ExternalPath
+    //     .getExternalStorageDirectories(); // Isn't accessible anymore after android 11, have to live with it I guess
+    if (sdcard != null && sdcard.existsSync()) {
+      try {
+        String path = sdcard.absolute.path;
+        print("External storage directory: ${path}");
+        def_hhh_dir = Path.join(path, "HHH");
+      } catch (e) {
+        try {
+          print("Exception, backing up... $e");
+          Directory? sdcard = await getExternalStorageDirectory();
+          if (sdcard != null) {
+            String path = sdcard.absolute.path;
+            def_hhh_dir = Path.join(path, "HHH");
+          }
+        } catch (e) {
+          print("Exception");
+        }
+      }
+    } else {
+      print("External storage directory = NULL");
+      var path = "/storage/emulated/0/";
+      print("WARNING: using default external storage dir: $path");
+      def_hhh_dir = Path.join(path, "HHH");
+    }
   }
 
   var hhhd =
       HHHDefaults(def_hhh_dir, DEFAULT_LLM, DEFAULT_LLM_FILE, DEFAULT_LLM_SIZE);
+
+  print("HHHDefaults: $hhhd");
 
   print("INIT db");
 
@@ -602,6 +654,27 @@ Future<AppInitParams> perform_app_init() async {
   }
 
   print("DONE perform_app_init");
+
+  if (Platform.isAndroid) {
+    Map<Permission, PermissionStatus> statuses =
+        // await [Permission.storage, Permission.manageExternalStorage].request();
+        await [Permission.storage].request();
+
+    var perm_success = true;
+    for (var item in statuses.entries) {
+      var granted = (item.value?.isGranted ?? false);
+      if (granted) {
+        print("[OK] PERMISSION ${item.key} GRANTED");
+      }
+      // else {
+      //   print("[ERROR] PERMISSION ${item.key} NOT GRANTED");
+      // }
+      perm_success &= granted;
+    }
+
+    return Future.value(AppInitParams(hhhd,
+        params: rp, storagePermissionGranted: perm_success));
+  }
 
   return Future.value(AppInitParams(hhhd, params: rp));
 }
@@ -744,34 +817,34 @@ class MyHomePageContent extends StatefulWidget {
 
 const WorkspaceRoot = "HHH";
 
-String resolve_llm_file(
-    {String llm_file = "openhermes-2-mistral-7b.Q4_K_M.gguf"}) {
-  List<String> paths = [];
-
-  String userDataRoot = ".";
-
-  if (Platform.isMacOS || Platform.isLinux) {
-    userDataRoot = Platform.environment["HOME"] ?? "";
-  } else if (Platform.isAndroid) {
-    // String internalStoragePrefix = "/data/user/0/<package_name>/files/";
-    // const String externalStoragePrefix = "/storage/emulated/0/";
-    userDataRoot = Path.join("/storage/emulated/0/", WorkspaceRoot);
-  }
-
-  paths.add(Path.join(userDataRoot, llm_file));
-  paths.add(String.fromEnvironment("MODELPATH") ?? "");
-  paths.add(Platform.environment["MODELPATH"] ?? "");
-  paths.add(Path.join(".", llm_file));
-
-  for (var p in paths) {
-    if (p.isNotEmpty && File(p).existsSync()) {
-      dlog("MODEL: probing $p");
-      return p;
-    }
-  }
-
-  throw FileSystemException("File not found", llm_file);
-}
+// String resolve_llm_file(
+//     {String llm_file = "openhermes-2-mistral-7b.Q4_K_M.gguf"}) {
+//   List<String> paths = [];
+//
+//   String userDataRoot = ".";
+//
+//   if (Platform.isMacOS || Platform.isLinux) {
+//     userDataRoot = Platform.environment["HOME"] ?? "";
+//   } else if (Platform.isAndroid) {
+//     // String internalStoragePrefix = "/data/user/0/<package_name>/files/";
+//     // const String externalStoragePrefix = "/storage/emulated/0/";
+//     userDataRoot = Path.join("/storage/emulated/0/", WorkspaceRoot);
+//   }
+//
+//   paths.add(Path.join(userDataRoot, llm_file));
+//   paths.add(String.fromEnvironment("MODELPATH") ?? "");
+//   paths.add(Platform.environment["MODELPATH"] ?? "");
+//   paths.add(Path.join(".", llm_file));
+//
+//   for (var p in paths) {
+//     if (p.isNotEmpty && File(p).existsSync()) {
+//       dlog("MODEL: probing $p");
+//       return p;
+//     }
+//   }
+//
+//   throw FileSystemException("File not found", llm_file);
+// }
 
 String truncateWithEllipsis(int cutoff, String myString) {
   return (myString.length <= cutoff)
@@ -1327,7 +1400,7 @@ const HHH_MODEL_SUBDIR = "Models";
 class _AppSetupForm extends State<AppSetupForm> {
   double btnFontSize = 20;
   bool canUserAdvance = false;
-  bool remind_storage_permissions = false;
+  bool remind_storage_permissions = true;
   bool _downloadCanStart = false;
   bool _downloadNecessary = true;
   bool _downloadSucceeded = false;
@@ -1390,7 +1463,20 @@ class _AppSetupForm extends State<AppSetupForm> {
         Path.basename(llm_url)));
 
     var llm_file_exists = await File(hhh_llm_dl_path).exists();
-    if (!llm_file_exists) return false;
+    var llm_file_can_be_opened = false;
+    try {
+      var f = File(hhh_llm_dl_path).openSync(mode: FileMode.read);
+      print("FREAD: $hhh_llm_dl_path => ${f.read(4).toString()}");
+      llm_file_can_be_opened = true;
+    } catch (e) {
+      print("ERROR: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path, $e");
+    }
+    if (!llm_file_can_be_opened) {
+      print("ERROR: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path");
+      // TODO: Backtrack to a safer llm file location
+    }
+
+    if (!(llm_file_exists && llm_file_can_be_opened)) return false;
     var llm_file_size = await File(hhh_llm_dl_path).length();
 
     print(
@@ -1424,7 +1510,9 @@ class _AppSetupForm extends State<AppSetupForm> {
     });
   }
 
-  _updateAdvancedForm(Map<String, dynamic> f) {}
+  _updateAdvancedForm(Map<String, dynamic> f) {
+    if (f['hhh_dir'] is String) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1442,9 +1530,13 @@ class _AppSetupForm extends State<AppSetupForm> {
     final hhh_llm_dl_path = Path.join(widget.resolved_defaults.hhh_dir,
         HHH_MODEL_SUBDIR, Path.basename(llm_url));
 
+    var mainPadding = Platform.isAndroid
+        ? EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0)
+        : EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
+
     return Container(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height - 200,
+          maxHeight: MediaQuery.of(context).size.height - 100,
         ),
         // height: MediaQuery.of(context).size.height,
         margin: EdgeInsets.all(48.0),
@@ -1454,7 +1546,7 @@ class _AppSetupForm extends State<AppSetupForm> {
         ),
         child: SingleChildScrollView(
             child: Padding(
-                padding: const EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0),
+                padding: mainPadding,
                 child: FastForm(
                     formKey: _formKey,
                     onChanged: (m) {
@@ -1664,7 +1756,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
   Timer? _token_counter_sync;
   int _input_tokens = 0;
 
-  Map<String, dynamic> llama_init_json = {};
+  Map<String, dynamic> llama_init_json = resolve_init_json();
 
   void lock_actions() {
     setState(() {
@@ -1795,7 +1887,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
 
     dialog.reinit(
         modelpath: new_modelpath,
-        llama_init_json: llama_init_json,
+        llama_init_json: resolve_init_json(),
         onInitDone: () {
           unlock_actions();
         });
@@ -1830,6 +1922,13 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
 
   bool app_setup_done() {
     var ret = getAppInitParams() != null;
+    if (Platform.isAndroid) {
+      var sp = widget.appInitParams.storagePermissionGranted;
+      if (!sp) {
+        print("SETUP INCOMPLETE: STORAGE PERMISSION NOT GRANTED");
+        return false;
+      }
+    }
     return ret;
   }
 
@@ -1838,9 +1937,11 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     if (dialog.init_postponed && getAppInitParams() != null) {
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
+      if (Platform.isAndroid) requestStoragePermission();
       dialog.reinit(
           modelpath: Path.join(p.hhh_dir, "Models", p.default_model),
           system_message: hermes_sysmsg,
+          llama_init_json: resolve_init_json(),
           onInitDone: () {
             unlock_actions();
           });
