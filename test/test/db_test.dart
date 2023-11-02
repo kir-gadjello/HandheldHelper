@@ -28,44 +28,60 @@ void main() async {
 
     setUpAll(() async {
       _chat = Chat(
-          uuid: Uuid.fromBytes([1]),
+          uuid: Uuid.generate(),
           clientUuid: chatManager.clientUuid,
           title: 'Test Chat');
 
       _message = Message.fromChat(_chat, 'Test Message', 'user', null);
 
+      print(
+          "Test creating chats and messages: ${_chat.toJson()}, ${_message.toJson()}");
+
       chat = await chatManager.createChat('Test Chat');
+
       message = await chatManager.addMessageToChat(
           chat.uuid, 'Test message', 'user') as Message;
-      // print(message);
+      print(message);
     });
 
     test('createChat creates a new chat', () async {
-      final chats = await chatManager.getChats();
+      final chats = await chatManager.getAllChats();
       expect(chats.map((c) => c.title), contains(chat.title));
     });
 
     test('addMessageToChat adds a message to a chat', () async {
-      final messages = await chatManager.getMessages(chat.uuid);
+      // previously added msg
+      final messages = await chatManager.getMessagesFromChat(chat.uuid);
+      var len = messages.length;
       expect(messages.map((m) => m.uuid), contains(message.uuid));
+
+      var _msg = await chatManager.addMessageToChat(
+          chat.uuid, 'different msg', 'user');
+
+      final messages2 = await chatManager.getMessagesFromChat(chat.uuid);
+      var len2 = messages2.length;
+      expect(messages2.map((m) => m.uuid), contains(_msg!.uuid));
+      expect(len2, len + 1);
     });
 
     test('updateMessage updates a message in a chat', () async {
-      // print("BEFORE ${await chatManager.getMessages(chat.uuid)}");
-      var _msg = await chatManager.addMessageToChat(
-          chat.uuid, 'lorem ipsum', 'user') as Message;
+      const ttxt = 'lorem ipsum';
+      var _msg = await chatManager.addMessageToChat(chat.uuid, ttxt, 'user')
+          as Message;
 
       var msg_uuid_bytes = _msg.uuid.toBytes();
       var msg_uuid_b64 = _msg.uuid.toString();
 
+      print("Created msg $msg_uuid_b64 with text $ttxt");
+
       expect((await chatManager.getMessage(_msg.uuid))!.message, _msg.message);
 
-      // print("AFTER ${await chatManager.getMessages(chat.uuid)}");
+      print("AFTER -> ${await chatManager.getMessagesFromChat(chat.uuid)}");
 
       dumpTable(tableName: 'messages', db: await chatManager.db());
 
       expect(
-          (await chatManager.getMessages(chat.uuid))
+          (await chatManager.getMessagesFromChat(chat.uuid))
               .map((m) => m.uuid.toBytes()),
           containsOnce(msg_uuid_bytes));
 
@@ -73,48 +89,86 @@ void main() async {
       print("Updating message ${_msg.uuid}");
       bool ret = await chatManager.updateMessage(_msg.uuid, newText);
       expect(ret, true);
-      final messages = await chatManager.getMessages(chat.uuid);
+      final messages = await chatManager.getMessagesFromChat(chat.uuid);
       final msg = messages.firstWhere((m) => m.uuid == _msg.uuid);
       expect(msg.message, contains(newText));
     });
 
     test('deleteMessage deletes a message from a chat', () async {
       await chatManager.deleteMessage(message.uuid);
-      final messages = await chatManager.getMessages(chat.uuid);
+      final messages = await chatManager.getMessagesFromChat(chat.uuid);
       expect(messages.map((m) => m.uuid), isNot(contains(message.uuid)));
     });
 
     test('searchMessages returns chats containing a substring', () async {
-      final chatsAndMessages = await chatManager.searchMessages('Test');
+      // dumpTable(tableName: 'messages', db: await chatManager.db());
+      final chatsAndMessages = await chatManager.searchMessages('Updated');
       expect(chatsAndMessages, isNotEmpty);
+      expect(chatsAndMessages.length, 1);
       expect(chatsAndMessages, everyElement(isA<(Chat, Message)>()));
+
+      final chatsAndMessages2 = await chatManager.searchMessages('different');
+      expect(chatsAndMessages2, isNotEmpty);
+      expect(chatsAndMessages2.length, 1);
+      expect(chatsAndMessages2, everyElement(isA<(Chat, Message)>()));
     });
 
-    // test(
-    //     'searchMessages is consistent after message creation and deletion', () async {
-    //   final chatsAndMessages1 = await chatManager.searchMessages('Test');
-    //   expect(chatsAndMessages1, isNotEmpty);
-    //   expect(chatsAndMessages1, everyElement(isA<(Chat,Message)>()));
-    //
-    //
-    //   // Add a new message to the chat
-    //   await chatManager.addMessageToChat(
-    //       chat.uuid, Message(id: 2, text: 'Another Test Message'));
-    //
-    //   // Check if the search results are still valid
-    //   final chatsAndMessages2 = await chatManager.searchMessages('Test');
-    //   expect(chatsAndMessages2, isNotEmpty);
-    //   expect(chatsAndMessages2, everyElement(isA<(Chat,Message)>()));
-    //
-    //
-    //   // Delete the new message from the chat
-    //   await chatManager.deleteMessage(2);
-    //
-    //   // Check if the search results are still valid
-    //   final chatsAndMessages3 = await chatManager.searchMessages('Test');
-    //   expect(chatsAndMessages3, isNotEmpty);
-    //   expect(chatsAndMessages3, everyElement(isA<Chat>()));
-    //   expect(chatsAndMessages3, everyElement(isA<Message>()));
-    // });
+    test('searchMessages is consistent after message creation and deletion',
+        () async {
+      final chatsAndMessagesNone =
+          await chatManager.searchMessages('osdhfldsuofn');
+      expect(chatsAndMessagesNone, isEmpty);
+
+      // dumpTable(
+      //     tableName: 'messages',
+      //     db: await chatManager.db(),
+      //     columns: {'message'});
+
+      final chatsAndMessages1 = await chatManager.searchMessages('Updated');
+      expect(chatsAndMessages1, isNotEmpty);
+      expect(chatsAndMessages1.length, 1);
+      expect(chatsAndMessages1, everyElement(isA<(Chat, Message)>()));
+
+      // Add a new message to the chat
+      var _msg2 = await chatManager.addMessageToChat(
+          chat.uuid, 'Another Updated Test Message', 'user');
+
+      print("INSERTION HAPPENED");
+
+      dumpTable(
+          tableName: 'messages',
+          db: await chatManager.db(),
+          columns: {'message'});
+      dumpTable(
+          tableName: 'messages_fts',
+          db: await chatManager.db(),
+          columns: {'message', 'rowid'});
+
+      // Check if the search results are still valid
+      final chatsAndMessages2 = await chatManager.searchMessages('Updated');
+      expect(chatsAndMessages2, isNotEmpty);
+      expect(chatsAndMessages2.length, 2);
+      expect(chatsAndMessages2, everyElement(isA<(Chat, Message)>()));
+
+      // Delete the new message from the chat
+      await chatManager.deleteMessage(_msg2!.uuid);
+
+      print("DELETION HAPPENED");
+      //
+      // dumpTable(
+      //     tableName: 'messages',
+      //     db: await chatManager.db(),
+      //     columns: {'message'});
+      // dumpTable(
+      //     tableName: 'messages_fts',
+      //     db: await chatManager.db(),
+      //     columns: {'message', 'rowid'});
+
+      // Check if the search results are still valid
+      final chatsAndMessages3 = await chatManager.searchMessages('Updated');
+      expect(chatsAndMessages3, isNotEmpty);
+      expect(chatsAndMessages3.length, 1);
+      expect(chatsAndMessages3, everyElement(isA<(Chat, Message)>()));
+    });
   });
 }

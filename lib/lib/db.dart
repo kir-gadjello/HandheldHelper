@@ -24,6 +24,7 @@ import 'dart:math';
 import 'dart:convert';
 
 // import 'package:flutter/services.dart';
+import 'package:ffi/ffi.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import "dart:typed_data";
@@ -70,9 +71,16 @@ void dumpTable(
   final List<String> columnNames = await fetchColumnNames(_db, tableName);
   final List<Map<String, dynamic>> allRows = await _db.query(tableName);
 
+  if (columns != null) {
+    for (var c in columns) {
+      columnNames.removeWhere((cn) => !columns.contains(cn));
+    }
+  }
+
   // Print the column names
   print("-------------------------------------------------");
-  print("<<< TABLE DUMP: ${tableName} from ${db.path} >>>");
+  print(
+      "<<< TABLE DUMP: ${tableName} (${allRows.length} rows) from ${db.path} >>>");
   print(columnNames.join('\t'));
 
   // Print the rows
@@ -125,18 +133,20 @@ class Uuid {
 
   @override
   bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is Uuid && listEquals(other._bytes, _bytes);
+    bool ret = false;
+    if (identical(this, other)) {
+      ret = true;
+    } else {
+      ret = other is Uuid && listEquals(other._bytes, _bytes);
+    }
+    // print("UUID EQ TEST ==: ${this.toString()} ? ${other.toString()} = $ret");
+    return ret;
   }
 
   @override
   int get hashCode => _bytes.hashCode;
 
   String get asString => base64UrlEncode(_bytes);
-
-  Uint8List toBytes() {
-    return Uint8List.fromList(_bytes);
-  }
 
   factory Uuid.generate() {
     final rng = Random();
@@ -147,12 +157,18 @@ class Uuid {
     return Uuid(bytes);
   }
 
-  Map<String, dynamic> toJson() => {'bytes': Uint8List.fromList(_bytes)};
+  Uint8List toBytes() {
+    return Uint8List.fromList(_bytes);
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'bytes': toBytes()};
+  }
 
   factory Uuid.fromJson(Map<String, dynamic> json) {
     final dynamicList = json['bytes'] as List<dynamic>;
     final List<int> bytes = dynamicList.map((item) => item as int).toList();
-    print("UUID BYTES: ${json['bytes']} => $bytes");
+    print("UUID BYTES: ${json['bytes']} => $bytes, Uuid(...) = ${Uuid(bytes)}");
     return Uuid(bytes);
   }
 
@@ -164,6 +180,72 @@ class Uuid {
         .join('')
         .toUpperCase();
   }
+}
+
+Future<void> createFtsIndex(
+    Database db, String tableName, List<String> fieldsToIndex) async {
+  String indexName = '${tableName}_fts';
+  String fields = fieldsToIndex.join(', ');
+
+  await db.execute('''
+    CREATE VIRTUAL TABLE IF NOT EXISTS $indexName USING fts4($fields)
+  ''');
+
+  await db.execute('''
+    CREATE TRIGGER IF NOT EXISTS ${tableName}_fts_insert AFTER INSERT ON $tableName BEGIN
+      INSERT INTO $indexName(rowid, $fields) SELECT new.rowid, ${fieldsToIndex.map((field) => 'new.$field').join(', ')};
+    END
+  ''');
+
+  await db.execute('''
+    CREATE TRIGGER IF NOT EXISTS ${tableName}_fts_update AFTER UPDATE ON $tableName BEGIN
+      DELETE FROM $indexName WHERE rowid = old.rowid;
+      INSERT INTO $indexName(rowid, $fields) VALUES(new.rowid, ${fieldsToIndex.map((field) => 'new.$field').join(', ')});
+    END
+  ''');
+
+  await db.execute('''
+    CREATE TRIGGER IF NOT EXISTS ${tableName}_fts_delete AFTER DELETE ON $tableName BEGIN
+      DELETE FROM $indexName WHERE rowid = old.rowid;
+    END
+  ''');
+}
+
+Future<List<Map<String, dynamic>>> search_fields(
+    Database db, String tableName, List<String> fields, String query) async {
+  if (fields.isEmpty) {
+    return [];
+  }
+
+  String indexName = '${tableName}_fts';
+  String fieldsMatch = "${fields[0]} MATCH ?";
+
+  if (fields.length > 1) {
+    fieldsMatch = fields.join(' MATCH ? OR ');
+  }
+
+  return await db.rawQuery('''
+   SELECT * FROM $tableName
+   WHERE rowid IN (
+     SELECT rowid FROM $indexName WHERE $fieldsMatch
+   )
+  ''', [query]);
+}
+
+Future<List<Map<String, dynamic>>> search_field(
+    Database db, String tableName, String field, String query) async {
+  String indexName = '${tableName}_fts';
+
+  return await db.rawQuery('''
+   SELECT * FROM $tableName 
+   WHERE rowid IN (
+     SELECT rowid FROM $indexName WHERE $field MATCH ?
+   )
+ ''', [query]);
+}
+
+int getUnixTime() {
+  return DateTime.now().millisecondsSinceEpoch ~/ 1000;
 }
 
 class Message {
@@ -186,7 +268,7 @@ class Message {
     int? date,
     Uuid? uuid,
   })  : uuid = uuid ?? Uuid.generate(),
-        date = date ?? DateTime.timestamp().second,
+        date = date ?? getUnixTime(),
         meta = meta ?? {};
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -205,7 +287,7 @@ class Message {
   factory Message.fromChat(Chat parent, String message, String username,
       Map<String, dynamic>? meta) {
     return Message(
-      date: DateTime.timestamp().second,
+      date: getUnixTime(),
       username: username,
       messageIndex: parent.lastMsgIndex + 1,
       message: message,
@@ -221,9 +303,9 @@ class Message {
       'username': username,
       'message_index': messageIndex,
       'message': message,
-      'uuid': uuid?.toBytes(),
-      'client_uuid': clientUuid?.toBytes(),
-      'chat_uuid': chatUuid?.toBytes(),
+      'uuid': uuid.toBytes(),
+      'client_uuid': clientUuid.toBytes(),
+      'chat_uuid': chatUuid.toBytes(),
       'meta': jsonEncode(meta),
     };
   }
@@ -249,7 +331,7 @@ class Chat {
     required this.title,
     Map<String, dynamic>? meta,
     int? lastMsgIndex,
-  })  : date = date ?? DateTime.now().second,
+  })  : date = date ?? getUnixTime(),
         lastMsgIndex = lastMsgIndex ?? 0,
         uuid = uuid ?? Uuid.generate(),
         meta = meta ?? {};
@@ -269,8 +351,8 @@ class Chat {
     return {
       'date': date,
       'title': title,
-      'uuid': uuid?.toBytes(),
-      'client_uuid': clientUuid?.toBytes(),
+      'uuid': uuid.toBytes(),
+      'client_uuid': clientUuid.toBytes(),
       'meta': jsonEncode(meta),
       'last_msg_index': lastMsgIndex,
     };
@@ -406,56 +488,8 @@ class DatabaseHelper {
       )
     ''');
 
-    await db.execute('''
-     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts4(message)
-    ''');
-
-    await db.execute('''
-     CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
-       INSERT INTO messages_fts(rowid, message) SELECT new.rowid, new.message;
-     END
-    ''');
-
-    // await db.execute('''
-    //  CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-    //    DELETE FROM messages_fts WHERE rowid = old.rowid;
-    //    INSERT INTO messages_fts(rowid, message) SELECT new.rowid, new.message;
-    //  END
-    // ''');
-
-    await db.execute('''
-    CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-    DELETE FROM messages_fts WHERE rowid = old.rowid;
-    INSERT OR IGNORE INTO messages_fts(rowid, message) VALUES(new.rowid, new.message);
-    END
-    ''');
-
-    await db.execute('''
-     CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-       DELETE FROM messages_fts WHERE rowid = old.rowid;
-     END
-    ''');
-
-    // // Create virtual table, indices, and triggers for fulltext search
-//     await db.execute('''
-//       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(message)
-//     ''');
-//     await db.execute('''
-//       CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
-//         INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
-//       END
-//     ''');
-//     await db.execute('''
-//       CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-//         INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
-//         INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
-//       END
-//     ''');
-//     await db.execute('''
-//       CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-//         INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
-//       END
-//     ''');
+    // Create FTS4 index for "messages" table
+    await createFtsIndex(db, 'messages', ['message']);
 
 // Create "chats" table
     await db.execute('''
@@ -487,7 +521,7 @@ class DatabaseHelper {
 
 class ChatManager {
   final DatabaseHelper _databaseHelper = DatabaseHelper();
-  Uuid clientUuid = Uuid.generate();
+  Uuid clientUuid = Uuid.generate(); // will be replaced later
 
   ChatManager();
 
@@ -515,8 +549,9 @@ class ChatManager {
   Future<Chat> createChat(String title) async {
     final db = await _databaseHelper.database;
 // final chatCount = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM chats')) ?? 0;
-    var chat = Chat(title: title, clientUuid: clientUuid);
-    print(chat.toJson());
+    var chat =
+        Chat(title: title, clientUuid: clientUuid, uuid: Uuid.generate());
+    print("createChat ${chat.toJson()}");
     await db.insert('chats', chat.toJson());
     return chat;
   }
@@ -542,9 +577,12 @@ class ChatManager {
       Uuid chatId, String messageText, String username,
       {Map<String, dynamic>? meta}) async {
     final db = await _databaseHelper.database;
+    print(chatId);
+
     var parent = await getChat(chatId);
     if (parent != null) {
       var msg = Message.fromChat(parent, messageText, username, meta);
+      print("addMessageToChat: ${msg.toJson()}");
       await db.insert('messages', msg.toJson());
       await updateChat(chatId, {'last_msg_index': parent.lastMsgIndex + 1});
       parent.lastMsgIndex++;
@@ -558,14 +596,19 @@ class ChatManager {
     Map<String, dynamic> row = {'message': newText, ...other_fields ?? {}};
     print("ROW: ${row}");
     try {
-      // await db.update('messages', row,
-      //     where: 'uuid = ?', whereArgs: [messageId.toBytes()]);
-
-      int updateCount = await db.rawUpdate('''
+      var query = '''
       UPDATE messages
-      SET message = '?'
+      SET message = ?
       WHERE uuid = ?
-      ''', [newText, messageId.toBytes()]);
+      ''';
+
+      var args = [newText, messageId.toBytes()];
+
+      print("updateMessage: $query args = $args");
+
+      int updateCount = await db.rawUpdate(query, args);
+
+      print("updateCount: $updateCount");
 
       return updateCount > 0;
     } catch (e) {
@@ -577,9 +620,9 @@ class ChatManager {
   Future<bool> deleteMessage(Uuid messageId) async {
     final db = await _databaseHelper.database;
     try {
-      await db.delete('messages',
+      int deleted = await db.delete('messages',
           where: 'uuid = ?', whereArgs: [messageId.toBytes()]);
-      return true;
+      return deleted == 1;
     } catch (e) {
       print("Exception $e");
       return false;
@@ -588,14 +631,7 @@ class ChatManager {
 
   Future<List<(Chat, Message)>> searchMessages(String substring) async {
     final db = await _databaseHelper.database;
-
-    final List<Map<String, dynamic>> results = await db.rawQuery('''
-       SELECT messages.uuid AS msg_uuid, chats.uuid AS chat_uuid 
-       FROM messages_fts 
-       JOIN messages ON messages_fts.rowid = messages.rowid 
-       JOIN chats ON messages.chat_uuid = chats.uuid 
-       WHERE messages_fts MATCH ?
-      ''', [substring]);
+    final results = await search_fields(db, 'messages', ['message'], substring);
 
     if (results.isEmpty) {
       return [];
@@ -604,7 +640,7 @@ class ChatManager {
     List<(Chat, Message)> output = [];
 
     for (var result in results) {
-      Uuid msgUuid = Uuid.fromBytes(result['msg_uuid']);
+      Uuid msgUuid = Uuid.fromBytes(result['uuid']);
       Uuid chatUuid = Uuid.fromBytes(result['chat_uuid']);
 
       Chat? chat = await getChat(chatUuid);
@@ -649,34 +685,62 @@ class ChatManager {
     return null;
   }
 
-  Future<List<Chat>> getChats() async {
+  Future<List<Chat>> getAllChats() async {
     final db = await _databaseHelper.database;
 
-    final List<Map<String, dynamic>> results = await db.query('chats');
-
-    if (results.isEmpty) {
-      return [];
-    }
+    final List<Map<String, dynamic>> results = await db.rawQuery('''
+    SELECT * FROM chats
+  ''');
 
     return results.map((result) => Chat.fromJson(result)).toList();
   }
 
-  Future<List<Message>> getMessages(Uuid chatId) async {
+  Future<List<Chat>> getChats(List<Uuid> chatUuids) async {
     final db = await _databaseHelper.database;
 
-    final List<Map<String, dynamic>> results = await db.query(
-      'messages',
-      where: 'chat_uuid = ?',
-      whereArgs: [chatId.toBytes()],
-    );
+    var placeholder =
+        List<String>.generate(chatUuids.length, (index) => '?').join(',');
 
-    if (results.isEmpty) {
-      return [];
-    }
+    final List<Map<String, dynamic>> results = await db.rawQuery('''
+    SELECT * FROM chats WHERE uuid IN ($placeholder)
+  ''', List.from(chatUuids.map((c) => c.toBytes())));
 
-    var msgs = results.map((result) => Message.fromJson(result)).toList();
-    msgs.sort((a, b) => a.messageIndex - b.messageIndex);
-    return msgs;
+    return results.map((result) => Chat.fromJson(result)).toList();
+  }
+
+  Future<List<Message>> getMessagesFromChat(Uuid chatId) async {
+    final db = await _databaseHelper.database;
+
+    var query = '''
+    SELECT * FROM messages WHERE chat_uuid = ?
+  ''';
+
+    var args = [chatId.toBytes()];
+
+    print("getMessages - $query , $args");
+
+    final List<Map<String, dynamic>> results = await db.rawQuery(query, args);
+
+    return results.map((result) => Message.fromJson(result)).toList();
+  }
+
+  Future<List<Message>> getMessages(List<Uuid> msgUuids) async {
+    final db = await _databaseHelper.database;
+
+    var placeholder =
+        List<String>.generate(msgUuids.length, (index) => '?').join(',');
+
+    var query = '''
+    SELECT * FROM messages WHERE uuid IN ($placeholder)
+  ''';
+
+    var args = List.from(msgUuids.map((c) => c.toBytes()));
+
+    print("getMessages - $query , $args");
+
+    final List<Map<String, dynamic>> results = await db.rawQuery(query, args);
+
+    return results.map((result) => Message.fromJson(result)).toList();
   }
 }
 
