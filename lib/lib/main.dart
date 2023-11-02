@@ -20,19 +20,6 @@ import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
 import 'package:external_path/external_path.dart';
 
-/* TODO
- [] async exec
- [] android version
- [] msg logging & search
- [] tab-like icon lists left and right of the title
- [] markdown or similar highlight in msgs
- [] send by Shift+Enter https://gist.github.com/elliette/d31aec75e000b3e2497a10d61bc6da0c https://api.flutter.dev/flutter/services/LogicalKeyboardKey-class.html
- [] support casualllm-14b
- [] python interpreter (desktops?) https://pub.dev/packages/serious_python https://pub.dev/packages/dartpy https://pub.dev/packages/python_ffi
- [] disable excessive llama.cpp logs
- [] web access with https://github.com/mozilla/readability & webview
- */
-
 Future<int> checkFileSize(String path) async {
   try {
     // Resolve symbolic links
@@ -61,18 +48,21 @@ Future<void> requestStoragePermission() async {
   }
 }
 
+/* widget source code */
 class HttpDownloadWidget extends StatefulWidget {
   final String url;
   final String destinationPath;
   final TextStyle? textStyle;
   Function(bool success, String url, String dstPath)? onDownloadEnd;
+  final http.Client? client;
 
   HttpDownloadWidget(
       {Key? key,
       required this.url,
       required this.destinationPath,
       this.onDownloadEnd,
-      this.textStyle})
+      this.textStyle,
+      this.client})
       : super(key: key);
 
   @override
@@ -102,7 +92,7 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
         isDownloading = true;
       });
 
-      final http.Client client = http.Client();
+      final http.Client client = widget.client ?? http.Client();
       final http.StreamedResponse response =
           await client.send(http.Request('GET', Uri.parse(widget.url)));
       this.response = response;
@@ -745,6 +735,37 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
+Widget hhhLoader({double size = 50}) {
+  return Expanded(
+      child: Container(
+          color: Colors.white,
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Stack(alignment: Alignment.center, children: [
+              Center(
+                  child: Padding(
+                      padding: EdgeInsets.only(right: 0.25 * size / 10),
+                      child: Text(
+                        textAlign: TextAlign.center,
+                        "HHH",
+                        style: TextStyle(
+                            fontSize: size / 10,
+                            color: Colors.lightBlue.shade200,
+                            fontStyle: FontStyle.italic,
+                            decoration: TextDecoration.none,
+                            fontWeight: FontWeight.bold),
+                      ))),
+              Center(
+                  child: Padding(
+                      padding: EdgeInsets.all(size / 10),
+                      child: GFLoader(
+                        type: GFLoaderType.ios,
+                        size: size,
+                        loaderstrokeWidth: 4.0,
+                      )))
+            ])
+          ])));
+}
+
 class _MyHomePageState extends State<MyHomePage> {
   late Future<AppInitParams> futureHHHDefaults;
 
@@ -759,38 +780,13 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    var topLeftTitle = "HHH"; // Platform.isAndroid ? "HHH" : "HandHeld Helper";
     return FutureBuilder<AppInitParams>(
       future: futureHHHDefaults,
       builder: (BuildContext context, AsyncSnapshot<AppInitParams> snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(
-            margin: EdgeInsets.all(128.0),
-            decoration: BoxDecoration(
-              color: Colors.lightBlue,
-              borderRadius: BorderRadius.circular(32.0),
-            ),
-            child: const Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "HandHeld Helper",
-                  style: TextStyle(
-                      fontSize: 48,
-                      color: Colors.white,
-                      decoration: TextDecoration.none,
-                      fontWeight: FontWeight.bold),
-                ),
-                // SizedBox(height: 20),
-                Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: GFLoader(
-                      type: GFLoaderType.ios,
-                      size: 50,
-                      loaderstrokeWidth: 4.0,
-                    )),
-              ],
-            ),
-          );
+        if (true && snapshot.connectionState == ConnectionState.waiting) {
+          return hhhLoader(
+              size: MediaQuery.of(context).size.shortestSide * 0.65);
         } else if (snapshot.hasError) {
           return Text('Error: ${snapshot.error}');
         } else {
@@ -1439,6 +1435,7 @@ class _AppSetupForm extends State<AppSetupForm> {
       exists &= await Directory(dir).exists();
     }
 
+    // TODO: attempt to copy/move the LLM checkpoint from user's Downloads
     var llm_file_ok = await _checkLLMfile();
     setState(() {
       _downloadCanStart = exists;
@@ -1554,7 +1551,7 @@ class _AppSetupForm extends State<AppSetupForm> {
                       _updateAdvancedForm(m);
                     },
                     children: <Widget>[
-                      Text(
+                      const Text(
                         'Welcome 👋💠',
                         style: TextStyle(fontSize: 48),
                       ),
@@ -1563,7 +1560,7 @@ class _AppSetupForm extends State<AppSetupForm> {
                               EdgeInsets.symmetric(horizontal: 0, vertical: 12),
                           child: Text(
                             '''HandHeld Helper is a fast and lean app allowing you to run LLM AIs locally, on your device.
-HHH respects your privacy: it works purely offline and never shares your data.
+HHH respects your privacy: once the LLM is downloaded, it works purely offline and never shares your data.
 LLM checkpoints are large binary files. To download, store, manage and operate them, the app needs certain permissions, as well as network bandwidth and storage space – currently 4.1 GB for a standard 7B model.''',
                             textAlign: TextAlign.left,
                             style: TextStyle(fontSize: btnFontSize),
@@ -1580,7 +1577,8 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                               'Please accept data storage permissions.',
                               style: largeBtnFontStyle,
                             )),
-                            Icon(Icons.check, size: 32, color: Colors.grey),
+                            const Icon(Icons.check,
+                                size: 32, color: Colors.grey),
                           ]),
                         )),
                       CollapsibleWidget(
@@ -1740,8 +1738,9 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
   }
 }
 
+LLMEngine llm = LLMEngine();
+
 class _MyHomePageContentState extends State<MyHomePageContent> {
-  AIDialog dialog = AIDialog();
   late ChatManager chatManager;
 
   late List<ChatMessage> _messages = [];
@@ -1775,7 +1774,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
   _MyHomePageContentState() {
     // llama_init_json = resolve_init_json();
     // dlog("LLAMA_INIT_JSON: ${llama_init_json}");
-    // dialog = AIDialog(
+    // dialog = LLMEngine(
     //     system_message: hermes_sysmsg,
     //     libpath: "librpcserver.dylib",
     //     modelpath: resolve_llm_file(),
@@ -1796,7 +1795,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     _messages = [
       ChatMessage(
         text:
-            "Beginning of conversation with model at ${dialog.modelpath}\nSystem prompt: $hermes_sysmsg",
+            "Beginning of conversation with model at ${llm.modelpath}\nSystem prompt: $hermes_sysmsg",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
       ),
@@ -1805,7 +1804,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
 
   void updateStreamingMsgView() {
     setState(() {
-      var poll_result = dialog.poll_advance_stream();
+      var poll_result = llm.poll_advance_stream();
       var finished = poll_result.finished;
 
       if (finished) {
@@ -1818,21 +1817,21 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
         //   stdout.write("$upd_str");
         // }
 
-        var completedMsg = dialog.msgs.last;
+        var completedMsg = llm.msgs.last;
 
         _messages[0].createdAt = completedMsg.createdAt;
         _messages[0].text = completedMsg.content;
 
         _typingUsers = [];
       } else {
-        _messages[0].text = dialog.stream_msg_acc;
+        _messages[0].text = llm.stream_msg_acc;
       }
     });
   }
 
   void addMsg(ChatMessage m, {use_polling = true}) {
     if (use_polling) {
-      var success = dialog.start_advance_stream(user_msg: m.text);
+      var success = llm.start_advance_stream(user_msg: m.text);
       _msg_streaming = true;
 
       setState(() {
@@ -1841,7 +1840,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
         var msg = ChatMessage(
             user: user_ai,
             text: "...", // TODO animation
-            createdAt: dialog.msgs.last.createdAt);
+            createdAt: llm.msgs.last.createdAt);
         _messages.insert(0, msg);
 
         _msg_poll_timer = Timer.periodic(
@@ -1851,15 +1850,15 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
       });
     } else {
       setState(() {
-        var success = dialog.advance(user_msg: m.text);
+        var success = llm.advance(user_msg: m.text);
         if (success) {
           _messages.insert(0, m);
           _messages.insert(
               0,
               ChatMessage(
                   user: user_ai,
-                  text: dialog.msgs.last.content,
-                  createdAt: dialog.msgs.last.createdAt));
+                  text: llm.msgs.last.content,
+                  createdAt: llm.msgs.last.createdAt));
           dlog("MSGS: ${_messages.map((m) => m.text)}");
         } else {
           _messages.insert(0, m);
@@ -1867,7 +1866,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
               0,
               ChatMessage(
                   user: user_SYSTEM,
-                  text: "ERROR: ${dialog.error}",
+                  text: "ERROR: ${llm.error}",
                   createdAt: DateTime.now()));
         }
       });
@@ -1885,7 +1884,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
       ];
     });
 
-    dialog.reinit(
+    llm.reinit(
         modelpath: new_modelpath,
         llama_init_json: resolve_init_json(),
         onInitDone: () {
@@ -1903,14 +1902,14 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
             }));
     const JsonEncoder encoder = JsonEncoder.withIndent('  ');
     return encoder.convert({
-      'meta': {'model': dialog.modelpath},
+      'meta': {'model': llm.modelpath},
       'messages': export_msgs
     });
   }
 
   void _update_token_counter(String upd) {
     setState(() {
-      _input_tokens = dialog.measure_tokens(upd);
+      _input_tokens = llm.measure_tokens(upd);
       dlog("LOG _update_token_counter $_input_tokens");
     });
   }
@@ -1933,12 +1932,12 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
   }
 
   void initAIifNotAlready() {
-    if (dialog.init_in_progress || dialog.initialized) return;
-    if (dialog.init_postponed && getAppInitParams() != null) {
+    if (llm.init_in_progress || llm.initialized) return;
+    if (llm.init_postponed && getAppInitParams() != null) {
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) requestStoragePermission();
-      dialog.reinit(
+      llm.reinit(
           modelpath: Path.join(p.hhh_dir, "Models", p.default_model),
           system_message: hermes_sysmsg,
           llama_init_json: resolve_init_json(),
@@ -1981,7 +1980,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     Color iconColor = actionsEnabled ? Colors.white : disabledColor;
 
     const Color warningColor = Colors.deepOrangeAccent;
-    bool tokenOverload = (dialog.tokens_used + _input_tokens) >= dialog.n_ctx;
+    bool tokenOverload = (llm.tokens_used + _input_tokens) >= llm.n_ctx;
 
     Widget mainWidget;
 
@@ -2070,7 +2069,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
                   TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
             )),
             Text(
-              "T:${dialog.tokens_used + _input_tokens}/${dialog.n_ctx}",
+              "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
               style: TextStyle(
                   color: actionsEnabled
                       ? (tokenOverload ? warningColor : Colors.white)
@@ -2109,7 +2108,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
               ),
               onPressed: actionsEnabled
                   ? () async {
-                      dialog.reset_msgs();
+                      llm.reset_msgs();
                       reset_msgs();
                     }
                   : null,

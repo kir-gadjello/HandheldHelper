@@ -2,13 +2,8 @@ import 'dart:convert' show jsonEncode, jsonDecode;
 import 'dart:ffi' as ffi;
 import 'dart:io' show File, Directory, Platform, FileSystemEntity;
 import 'package:path/path.dart' as Path;
-import 'dart:collection';
 import 'package:ffi/ffi.dart';
-import 'dart:isolate';
 import 'dart:async';
-import 'package:async/async.dart';
-
-// import 'isolate_rpc.dart';
 
 import 'llamarpc_generated_bindings.dart' as binding;
 
@@ -85,7 +80,11 @@ String trimLastCharacter(String srcStr, String pattern) {
   return srcStr;
 }
 
-enum AIDialogSTATE { NOT_INITIALIZED, INITIALIZED_SUCCESS, INITIALIZED_FAILURE }
+enum LLMEngineState {
+  NOT_INITIALIZED,
+  INITIALIZED_SUCCESS,
+  INITIALIZED_FAILURE
+}
 
 class SUpdate {
   String content = "";
@@ -229,7 +228,7 @@ String? resolve_shared_library_path(String libname) {
 
 const LIBLLAMARPC = "librpcserver";
 
-class AIDialog {
+class LLMEngine {
   String system_message = "";
   String? libpath = "$LLAMA_SO";
   String modelpath = "";
@@ -245,7 +244,7 @@ class AIDialog {
   int tokens_used = 0;
   int n_ctx = 0;
 
-  AIDialogSTATE state = AIDialogSTATE.NOT_INITIALIZED;
+  LLMEngineState state = LLMEngineState.NOT_INITIALIZED;
 
   List<AIChatMessage> msgs = [];
 
@@ -253,7 +252,7 @@ class AIDialog {
 
   late binding.LLamaRPC rpc;
 
-  AIDialog(
+  LLMEngine(
       {this.postpone_init = false,
       this.system_message = "",
       this.libpath,
@@ -313,7 +312,7 @@ class AIDialog {
       initialized = true;
     } else if (sysinfo['init_success'] == -1) {
       initialized = false;
-      state = AIDialogSTATE.INITIALIZED_FAILURE;
+      state = LLMEngineState.INITIALIZED_FAILURE;
     }
 
     print("LOG sysinfo: $sysinfo");
@@ -347,7 +346,7 @@ class AIDialog {
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
       onInitDone}) {
-    if (state == AIDialogSTATE.INITIALIZED_SUCCESS) {
+    if (state == LLMEngineState.INITIALIZED_SUCCESS) {
       teardown();
     }
 
@@ -401,7 +400,7 @@ class AIDialog {
           poll_init();
           if (initialized) {
             init_in_progress = false;
-            state = AIDialogSTATE.INITIALIZED_SUCCESS;
+            state = LLMEngineState.INITIALIZED_SUCCESS;
             print("Init complete at ${DateTime.now()}");
             print("[OK] Loaded model... $modelpath");
             timer.cancel();
@@ -409,7 +408,7 @@ class AIDialog {
               onInitDone();
             }
           }
-          if (state == AIDialogSTATE.INITIALIZED_FAILURE) {
+          if (state == LLMEngineState.INITIALIZED_FAILURE) {
             print("Init FAILED at ${DateTime.now()}");
             timer.cancel();
           }
@@ -432,11 +431,11 @@ class AIDialog {
             "--------------------------------------------------\nChat mode: ON");
       }
     } catch (e) {
-      state = AIDialogSTATE.INITIALIZED_FAILURE;
+      state = LLMEngineState.INITIALIZED_FAILURE;
       return false;
     }
 
-    state = AIDialogSTATE.INITIALIZED_SUCCESS;
+    state = LLMEngineState.INITIALIZED_SUCCESS;
     return true;
   }
 
@@ -618,6 +617,6 @@ class AIDialog {
 
   void teardown() {
     rpc.deinit();
-    state = AIDialogSTATE.NOT_INITIALIZED;
+    state = LLMEngineState.NOT_INITIALIZED;
   }
 }

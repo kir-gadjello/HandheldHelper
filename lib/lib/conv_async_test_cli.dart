@@ -24,7 +24,7 @@ Map<String, dynamic> resolve_init_json() {
 }
 
 void main() async {
-  var d = AIDialog(
+  var d = LLMEngine(
       system_message:
           "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.",
       libpath: "./native/librpcserver.dylib",
@@ -43,10 +43,10 @@ void main() async {
   int msg_counter = 0;
 
   while (true) {
-
     String user_msg;
 
-    if (msg_counter == 0 && (Platform.environment["PROMPTFILE"] ?? "").isNotEmpty) {
+    if (msg_counter == 0 &&
+        (Platform.environment["PROMPTFILE"] ?? "").isNotEmpty) {
       var ppath = Platform.environment["PROMPTFILE"] ?? "";
       print("Using first user message from PROMPTFILE...");
       String promptfile = File(ppath).readAsStringSync();
