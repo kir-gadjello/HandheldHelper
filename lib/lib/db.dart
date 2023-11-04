@@ -209,7 +209,8 @@ Future<void> createFtsIndex(
 }
 
 Future<List<Map<String, dynamic>>> search_fields(
-    Database db, String tableName, List<String> fields, String query) async {
+    Database db, String tableName, List<String> fields, String query,
+    {bool prefixQuery = false}) async {
   if (fields.isEmpty) {
     return [];
   }
@@ -221,23 +222,32 @@ Future<List<Map<String, dynamic>>> search_fields(
     fieldsMatch = fields.join(' MATCH ? OR ');
   }
 
+  if (prefixQuery) {
+    query += '*';
+  }
+
   return await db.rawQuery('''
-   SELECT * FROM $tableName
-   WHERE rowid IN (
-     SELECT rowid FROM $indexName WHERE $fieldsMatch
-   )
-  ''', [query]);
+  SELECT * FROM $tableName
+  WHERE rowid IN (
+    SELECT rowid FROM $indexName WHERE $fieldsMatch
+  )
+ ''', [query]);
 }
 
 Future<List<Map<String, dynamic>>> search_field(
-    Database db, String tableName, String field, String query) async {
+    Database db, String tableName, String field, String query,
+    {bool prefixQuery = false}) async {
   String indexName = '${tableName}_fts';
 
+  if (prefixQuery) {
+    query += '*';
+  }
+
   return await db.rawQuery('''
-   SELECT * FROM $tableName 
-   WHERE rowid IN (
-     SELECT rowid FROM $indexName WHERE $field MATCH ?
-   )
+  SELECT * FROM $tableName 
+  WHERE rowid IN (
+    SELECT rowid FROM $indexName WHERE $field MATCH ?
+  )
  ''', [query]);
 }
 
@@ -315,7 +325,7 @@ class Message {
 
 class Chat {
   int date;
-  String title;
+  String? title;
   Uuid uuid;
   Uuid clientUuid;
   Map<String, dynamic> meta;
@@ -325,7 +335,7 @@ class Chat {
     int? date,
     Uuid? uuid,
     required this.clientUuid,
-    required this.title,
+    this.title,
     Map<String, dynamic>? meta,
     int? lastMsgIndex,
   })  : date = date ?? getUnixTime(),
@@ -353,6 +363,13 @@ class Chat {
       'meta': jsonEncode(meta),
       'last_msg_index': lastMsgIndex,
     };
+  }
+
+  String getHeading() {
+    if (title != null) {
+      return title!;
+    }
+    return "Chat from ${DateTime.fromMicrosecondsSinceEpoch(date * 1000000).toString()}";
   }
 }
 
@@ -543,7 +560,7 @@ class ChatManager {
     return await _databaseHelper.getTables();
   }
 
-  Future<Chat> createChat(String title) async {
+  Future<Chat> createChat({String? title}) async {
     final db = await _databaseHelper.database;
 // final chatCount = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM chats')) ?? 0;
     var chat =
@@ -626,9 +643,11 @@ class ChatManager {
     }
   }
 
-  Future<List<(Chat, Message)>> searchMessages(String substring) async {
+  Future<List<(Chat, Message)>> searchMessages(String substring,
+      {bool prefixQuery = false}) async {
     final db = await _databaseHelper.database;
-    final results = await search_fields(db, 'messages', ['message'], substring);
+    final results = await search_fields(db, 'messages', ['message'], substring,
+        prefixQuery: prefixQuery);
 
     if (results.isEmpty) {
       return [];

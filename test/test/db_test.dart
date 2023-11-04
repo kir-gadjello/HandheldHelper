@@ -37,7 +37,7 @@ void main() async {
       print(
           "Test creating chats and messages: ${_chat.toJson()}, ${_message.toJson()}");
 
-      chat = await chatManager.createChat('Test Chat');
+      chat = await chatManager.createChat(title: 'Test Chat');
 
       message = await chatManager.addMessageToChat(
           chat.uuid, 'Test message', 'user') as Message;
