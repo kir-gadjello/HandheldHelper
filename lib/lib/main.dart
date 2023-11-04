@@ -11,11 +11,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
-import 'llm_engine.dart';
+import 'conv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
@@ -510,6 +508,21 @@ class HHHDefaults {
   }
 }
 
+String resolve_llm_file(RootAppParams p) {
+  var ret = Path.join(p.hhh_dir, "Models", p.default_model);
+  final fcand = (String.fromEnvironment("MODELPATH") ?? "");
+  final env_cand = (Platform.environment["MODELPATH"] ?? "");
+  if (fcand.isNotEmpty && File(fcand).existsSync()) {
+    print("OVERRIDING LLM PATH TO $fcand");
+    ret = fcand;
+  }
+  if (env_cand.isNotEmpty && File(env_cand).existsSync()) {
+    print("OVERRIDING LLM PATH TO $env_cand");
+    ret = env_cand;
+  }
+  return ret;
+}
+
 String attemptResolveSymlink(String p) {
   if (File(p).existsSync() && FileSystemEntity.isLinkSync(p)) {
     return File(p).resolveSymbolicLinksSync();
@@ -647,28 +660,6 @@ Future<AppInitParams> perform_app_init() async {
   print("INIT db");
 
   final DatabaseHelper _databaseHelper = DatabaseHelper();
-
-  if (isDevelopment()) {
-    try {
-      var cm = ChatManager();
-      var chats = await cm.getAllChats();
-      if (chats.isEmpty) {
-        print("Populating db with test chats and messages...");
-        var c0 = await cm.createChat(title: 'test0');
-        var c1 = await cm.createChat(title: 'test1');
-        var c2 = await cm.createChat();
-        await cm.addMessageToChat(c0.uuid, "Test message 0", "SYSTEM");
-        await cm.addMessageToChat(c0.uuid, "Testing message 1", "user");
-        await cm.addMessageToChat(c1.uuid, "Another Test message 00", "user");
-        await cm.addMessageToChat(c1.uuid, "Testing message 11", "AI");
-        await cm.addMessageToChat(c1.uuid, "Different message 00", "user");
-        await cm.addMessageToChat(c1.uuid, "lorem ipsum", "AI");
-      }
-    } catch (e) {
-      print("Exception: $e");
-    }
-  }
-
   var metadb = MetadataManager();
   var root_app_params = await metadb.getMetadata("root_app_params");
   RootAppParams? rp;
@@ -716,10 +707,75 @@ Future<AppInitParams> perform_app_init() async {
   return Future.value(AppInitParams(hhhd, params: rp));
 }
 
-Widget hhhLoader(String key, {double size = 50}) {
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  // This widget is the root of your application.
+  @override
+  Widget build(BuildContext context) {
+    var colorScheme = ColorScheme.fromSeed(
+        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
+    return MaterialApp(
+      title: 'HandHeld Helper',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        // This is the theme of your application.
+        //
+        // TRY THIS: Try running your application with "flutter run". You'll see
+        // the application has a blue toolbar. Then, without quitting the app,
+        // try changing the seedColor in the colorScheme below to Colors.green
+        // and then invoke "hot reload" (save your changes or press the "hot
+        // reload" button in a Flutter-supported IDE, or press "r" if you used
+        // the command line to start the app).
+        //
+        // Notice that the counter didn't reset back to zero; the application
+        // state is not lost during the reload. To reset the state, use hot
+        // restart instead.
+        //
+        // This works for code too, not just values: Most code changes can be
+        // tested with just a hot reload.
+        colorScheme: colorScheme,
+        useMaterial3: true,
+      ),
+      home: MyHomePage(title: 'HandHeld Helper'),
+    );
+  }
+}
+
+// class MyHomePage extends StatefulWidget {
+//   MyHomePage({super.key, required this.title});
+//   // RootAppParams? this.root_app_params,
+//   // required HHHDefaults this.resolved_defaults});
+//
+//   // This widget is the home page of your application. It is stateful, meaning
+//   // that it has a State object (defined below) that contains fields that affect
+//   // how it looks.
+//
+//   // This class is the configuration for the state. It holds the values (in this
+//   // case the title) provided by the parent (in this case the App widget) and
+//   // used by the build method of the State. Fields in a Widget subclass are
+//   // always marked "final".
+//
+//   final String title;
+//   // RootAppParams? root_app_params;
+//   // HHHDefaults resolved_defaults;
+//
+//   @override
+//   State<MyHomePage> createState() => _MyHomePageState();
+// }
+
+class MyHomePage extends StatefulWidget {
+  MyHomePage({Key? key, required this.title}) : super(key: key);
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+Widget hhhLoader({double size = 50}) {
   return Expanded(
       child: Container(
-          key: Key(key),
           color: Colors.white,
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Stack(alignment: Alignment.center, children: [
@@ -748,66 +804,81 @@ Widget hhhLoader(String key, {double size = 50}) {
           ])));
 }
 
-// class _MyHomePageState extends State<MyHomePage> {
-//   late Future<AppInitParams> futureHHHDefaults;
-//
-//   @override
-//   State<MyHomePage> createState() => _MyHomePageState();
-//
-//   @override
-//   void initState() {
-//     super.initState();
-//     futureHHHDefaults = perform_app_init();
-//   }
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     var topLeftTitle = "HHH"; // Platform.isAndroid ? "HHH" : "HandHeld Helper";
-//     return FutureBuilder<AppInitParams>(
-//       future: futureHHHDefaults,
-//       builder: (BuildContext context, AsyncSnapshot<AppInitParams> snapshot) {
-//         if (true && snapshot.connectionState == ConnectionState.waiting) {
-//           return hhhLoader(
-//               size: MediaQuery.of(context).size.shortestSide * 0.65);
-//         } else if (snapshot.hasError) {
-//           return Text('Error: ${snapshot.error}');
-//         } else {
-//           return ActiveChatPage(
-//               title: widget.title,
-//               appInitParams: snapshot.data as AppInitParams);
-//         }
-//       },
-//     );
-//   }
-// }
+class _MyHomePageState extends State<MyHomePage> {
+  late Future<AppInitParams> futureHHHDefaults;
 
-class ActiveChatPage extends StatefulWidget {
-  ActiveChatPage({Key? key, required this.title, required this.appInitParams})
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+
+  @override
+  void initState() {
+    super.initState();
+    futureHHHDefaults = perform_app_init();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var topLeftTitle = "HHH"; // Platform.isAndroid ? "HHH" : "HandHeld Helper";
+    return FutureBuilder<AppInitParams>(
+      future: futureHHHDefaults,
+      builder: (BuildContext context, AsyncSnapshot<AppInitParams> snapshot) {
+        if (true && snapshot.connectionState == ConnectionState.waiting) {
+          return hhhLoader(
+              size: MediaQuery.of(context).size.shortestSide * 0.65);
+        } else if (snapshot.hasError) {
+          return Text('Error: ${snapshot.error}');
+        } else {
+          return MyHomePageContent(
+              title: widget.title,
+              appInitParams: snapshot.data as AppInitParams);
+        }
+      },
+    );
+  }
+}
+
+class MyHomePageContent extends StatefulWidget {
+  MyHomePageContent(
+      {Key? key, required this.title, required this.appInitParams})
       : super(key: key);
 
   final String title;
   final AppInitParams appInitParams;
 
   @override
-  State<ActiveChatPage> createState() => _ActiveChatPageState();
+  State<MyHomePageContent> createState() => _MyHomePageContentState();
 }
 
 const WorkspaceRoot = "HHH";
 
-String resolve_llm_file(RootAppParams p) {
-  var ret = Path.join(p.hhh_dir, "Models", p.default_model);
-  final fcand = (String.fromEnvironment("MODELPATH") ?? "");
-  final env_cand = (Platform.environment["MODELPATH"] ?? "");
-  if (fcand.isNotEmpty && File(fcand).existsSync()) {
-    print("OVERRIDING LLM PATH TO $fcand");
-    ret = fcand;
-  }
-  if (env_cand.isNotEmpty && File(env_cand).existsSync()) {
-    print("OVERRIDING LLM PATH TO $env_cand");
-    ret = env_cand;
-  }
-  return ret;
-}
+// String resolve_llm_file(
+//     {String llm_file = "openhermes-2-mistral-7b.Q4_K_M.gguf"}) {
+//   List<String> paths = [];
+//
+//   String userDataRoot = ".";
+//
+//   if (Platform.isMacOS || Platform.isLinux) {
+//     userDataRoot = Platform.environment["HOME"] ?? "";
+//   } else if (Platform.isAndroid) {
+//     // String internalStoragePrefix = "/data/user/0/<package_name>/files/";
+//     // const String externalStoragePrefix = "/storage/emulated/0/";
+//     userDataRoot = Path.join("/storage/emulated/0/", WorkspaceRoot);
+//   }
+//
+//   paths.add(Path.join(userDataRoot, llm_file));
+//   paths.add(String.fromEnvironment("MODELPATH") ?? "");
+//   paths.add(Platform.environment["MODELPATH"] ?? "");
+//   paths.add(Path.join(".", llm_file));
+//
+//   for (var p in paths) {
+//     if (p.isNotEmpty && File(p).existsSync()) {
+//       dlog("MODEL: probing $p");
+//       return p;
+//     }
+//   }
+//
+//   throw FileSystemException("File not found", llm_file);
+// }
 
 String truncateWithEllipsis(int cutoff, String myString) {
   return (myString.length <= cutoff)
@@ -1078,7 +1149,7 @@ class EnabledButton extends StatelessWidget {
       onPressed: isDisabled
           ? null // Button is disabled
           : () {
-              Navigator.pushNamed(context, '/active_chat'); // Open chat route
+              Navigator.pushNamed(context, '/chat/main'); // Open chat route
             },
       child: isDisabled
           ? Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1143,7 +1214,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
     if (path != null) {
       setState(() {
         _controller.text = path!;
-        _path = path;
+        _path = path!;
       });
       _checkFileOrDirectoryExists();
     }
@@ -1170,7 +1241,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         decoration: BoxDecoration(
           color: _succeeded ? Colors.lightGreen[100] : Colors.red[50],
-          borderRadius: const BorderRadius.all(Radius.circular(16)),
+          borderRadius: BorderRadius.all(Radius.circular(16)),
         ),
         child: Row(
           children: [
@@ -1707,7 +1778,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
 
 LLMEngine llm = LLMEngine();
 
-class _ActiveChatPageState extends State<ActiveChatPage> {
+class _MyHomePageContentState extends State<MyHomePageContent> {
   late ChatManager chatManager;
 
   late List<ChatMessage> _messages = [];
@@ -1724,28 +1795,33 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
-  @override
-  void dispose() {
-    _msg_poll_timer?.cancel();
-    _token_counter_sync?.cancel();
-    super.dispose();
-  }
-
   void lock_actions() {
     setState(() {
-      _initialized = false;
       print("ACTIONS LOCKED");
+      _initialized = false;
     });
   }
 
   void unlock_actions() {
-    return setState(() {
-      _initialized = true;
+    setState(() {
       print("ACTIONS UNLOCKED");
+      _initialized = true;
     });
   }
 
-  _ActiveChatPageState() {}
+  _MyHomePageContentState() {
+    // llama_init_json = resolve_init_json();
+    // dlog("LLAMA_INIT_JSON: ${llama_init_json}");
+    // dialog = LLMEngine(
+    //     system_message: hermes_sysmsg,
+    //     libpath: "librpcserver.dylib",
+    //     modelpath: resolve_llm_file(),
+    //     llama_init_json: llama_init_json,
+    //     onInitDone: () {
+    //       unlock_actions();
+    //     });
+    // _reset_msgs();
+  }
 
   void reset_msgs() {
     setState(() {
@@ -1793,11 +1869,7 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
 
   void addMsg(ChatMessage m, {use_polling = true}) {
     if (use_polling) {
-      var success = llm.start_advance_stream(
-          user_msg: m.text,
-          async_slack_ms: Platform.isAndroid
-              ? 16 /* on mobile devices, give some CPU time back to the UI */
-              : 0);
+      var success = llm.start_advance_stream(user_msg: m.text);
       _msg_streaming = true;
 
       setState(() {
@@ -1857,6 +1929,7 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
           reset_msgs();
           unlock_actions();
         });
+    reset_msgs();
   }
 
   String serialize_msgs() {
@@ -1918,12 +1991,11 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
     print("!!! SETUP COMPLETE, RECEIVED PARAMS: ${p.toJson()}");
     var metadb = MetadataManager();
     await metadb.setMetadata("root_app_params", jsonEncode(p.toJson()));
-    setState(() {
-      widget.appInitParams.params = p;
-      if (widget.appInitParams.params != null) {
-        _active_app_params = widget.appInitParams.params;
-      }
-    });
+    widget.appInitParams.params = p;
+    if (widget.appInitParams.params != null) {
+      _active_app_params = widget.appInitParams.params;
+    }
+    setState(() {});
   }
 
   Widget buildAppSetupScreen() {
@@ -1944,466 +2016,194 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
     // than having to individually change instances of widgets.
 
     bool actionsEnabled = _initialized && !_msg_streaming;
-
     const Color disabledColor = Colors.white60;
     Color iconColor = actionsEnabled ? Colors.white : disabledColor;
 
     const Color warningColor = Colors.deepOrangeAccent;
     bool tokenOverload = (llm.tokens_used + _input_tokens) >= llm.n_ctx;
 
-    print(
-        "ACTIVECHAT BUILD, _initialized=$_initialized, actionsEnabled=$actionsEnabled");
+    Widget mainWidget;
 
-    final _app_setup_done = app_setup_done();
-
-    if (_app_setup_done) {
+    if (app_setup_done()) {
       initAIifNotAlready();
-      print("initAIifNotAlready() called, _initialized=$_initialized");
-      print("rendering DashChat");
+      mainWidget = Expanded(
+        child: DashChat(
+          inputOptions: InputOptions(
+              // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
+              sendOnEnter: false,
+              sendOnShiftEnter: true,
+              alwaysShowSend: true,
+              inputToolbarMargin: EdgeInsets.all(8.0),
+              inputDisabled: !(_initialized ?? false),
+              onTextChange: (String upd) {
+                dlog("LOG onTextChange $upd");
+                if (_token_counter_sync != null) {
+                  _token_counter_sync?.cancel();
+                }
+                _token_counter_sync =
+                    Timer(const Duration(milliseconds: 300), () {
+                  _update_token_counter(upd);
+                });
+              }),
+          messageOptions: MessageOptions(
+              messageTextBuilder: customMessageTextBuilder,
+              showCurrentUserAvatar: false,
+              showOtherUsersAvatar: false,
+              onLongPressMessage: (m) {
+                String msg = "${m.user.getFullName()}: ${m.text}";
+                FlutterClipboard.copy(msg);
+                final snackBar = SnackBar(
+                  content: Text(
+                      "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard"),
+                );
+                ScaffoldMessenger.of(context).showSnackBar(snackBar);
+              }),
+          currentUser: user,
+          typingUsers: _typingUsers,
+          onSend: (ChatMessage m) {
+            dlog("NEW MSG: ${m.text}");
+            _input_tokens = 0;
+            addMsg(m);
+          },
+          messages: _messages,
+        ),
+      );
+      if (!_initialized) {
+        mainWidget = Stack(
+          children: <Widget>[
+            // Your existing widget tree goes here
+            const Center(
+                child: Padding(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 200, vertical: 200),
+                    child: SizedBox(
+                        width: 512,
+                        child: GFLoader(
+                          type: GFLoaderType.ios,
+                          size: 50,
+                          loaderstrokeWidth: 4.0,
+                        )))),
+            Container(
+              color: Colors.black.withOpacity(0.5),
+            ),
+          ],
+        );
+      }
+    } else {
+      mainWidget = buildAppSetupScreen();
     }
 
     return Scaffold(
-        key: Key("active_chat_sc"),
-        appBar: AppBar(
-            // TRY THIS: Try changing the color here to a specific color (to
-            // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-            // change color while the other colors stay the same.
-            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-            // Here we take the value from the MyHomePage object that was created by
-            // the App.build method, and use it to set our appbar title.
-            title: Row(children: [
-              Expanded(
-                  child: Text(
-                "${widget.title}",
-                style:
-                    TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
-              )),
-              Text(
-                "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
-                style: TextStyle(
-                    color: actionsEnabled
-                        ? (tokenOverload ? warningColor : Colors.white)
-                        : disabledColor),
-              )
-            ]),
-            actions: <Widget>[
-              IconButton(
-                  disabledColor: disabledColor,
-                  icon: Icon(
-                    Icons.sync_alt,
-                    color: iconColor,
-                  ),
-                  onPressed: actionsEnabled
-                      ? () async {
-                          FilePickerResult? result =
-                              await FilePicker.platform.pickFiles();
-
-                          if (result != null) {
-                            File file = File(result.files.single.path ?? "");
-                            if (file.existsSync()) {
-                              var new_model = file.path;
-                              dlog("RELOADING FROM $new_model");
-                              reload_model_from_file(new_model);
-                            }
-                          } else {
-                            // User canceled the picker
-                          }
-                        }
-                      : null),
-              IconButton(
+      appBar: AppBar(
+          // TRY THIS: Try changing the color here to a specific color (to
+          // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
+          // change color while the other colors stay the same.
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          // Here we take the value from the MyHomePage object that was created by
+          // the App.build method, and use it to set our appbar title.
+          title: Row(children: [
+            Expanded(
+                child: Text(
+              "${widget.title}",
+              style:
+                  TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
+            )),
+            Text(
+              "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
+              style: TextStyle(
+                  color: actionsEnabled
+                      ? (tokenOverload ? warningColor : Colors.white)
+                      : disabledColor),
+            )
+          ]),
+          actions: <Widget>[
+            IconButton(
                 disabledColor: disabledColor,
                 icon: Icon(
-                  Icons.restart_alt,
+                  Icons.sync_alt,
                   color: iconColor,
                 ),
                 onPressed: actionsEnabled
                     ? () async {
-                        llm.reset_msgs();
-                        reset_msgs();
+                        FilePickerResult? result =
+                            await FilePicker.platform.pickFiles();
+
+                        if (result != null) {
+                          File file = File(result.files.single.path ?? "");
+                          if (file.existsSync()) {
+                            var new_model = file.path;
+                            dlog("RELOADING FROM $new_model");
+                            reload_model_from_file(new_model);
+                          }
+                        } else {
+                          // User canceled the picker
+                        }
                       }
-                    : null,
+                    : null),
+            IconButton(
+              disabledColor: disabledColor,
+              icon: Icon(
+                Icons.restart_alt,
+                color: iconColor,
               ),
-              IconButton(
-                disabledColor: disabledColor,
-                icon: Icon(
-                  Icons.ios_share,
-                  color: iconColor,
-                ),
-                onPressed: actionsEnabled
-                    ? () {
-                        FlutterClipboard.copy(serialize_msgs());
+              onPressed: actionsEnabled
+                  ? () async {
+                      llm.reset_msgs();
+                      reset_msgs();
+                    }
+                  : null,
+            ),
+            IconButton(
+              disabledColor: disabledColor,
+              icon: Icon(
+                Icons.ios_share,
+                color: iconColor,
+              ),
+              onPressed: actionsEnabled
+                  ? () {
+                      FlutterClipboard.copy(serialize_msgs());
 
-                        const snackBar = SnackBar(
-                          content: Text('Conversation copied to clipboard'),
-                        );
+                      const snackBar = SnackBar(
+                        content: Text('Conversation copied to clipboard'),
+                      );
 
-                        // Find the ScaffoldMessenger in the widget tree
-                        // and use it to show a SnackBar.
-                        ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                        Timer(Duration(milliseconds: 500), () {
-                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                        });
-                      }
-                    : null,
-              )
-            ],
-            toolbarHeight: 48.0),
-        body: Center(
-            child: Column(
-                key: Key("active_dashchat_cc $_initialized"),
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-              _app_setup_done
-                  ? (_initialized
-                      ? Expanded(
-                          key: Key("active_dashchat_cce $_initialized"),
-                          child: DashChat(
-                            key: Key("active_dashchat $_initialized"),
-                            inputOptions: InputOptions(
-                                // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
-                                sendOnEnter: false,
-                                sendOnShiftEnter: true,
-                                alwaysShowSend: true,
-                                inputToolbarMargin: EdgeInsets.all(8.0),
-                                inputDisabled: !(_initialized ?? false),
-                                onTextChange: (String upd) {
-                                  dlog("LOG onTextChange $upd");
-                                  if (_token_counter_sync != null) {
-                                    _token_counter_sync?.cancel();
-                                  }
-                                  _token_counter_sync = Timer(
-                                      const Duration(milliseconds: 300), () {
-                                    _update_token_counter(upd);
-                                  });
-                                }),
-                            messageOptions: MessageOptions(
-                                messageTextBuilder: customMessageTextBuilder,
-                                showCurrentUserAvatar: false,
-                                showOtherUsersAvatar: false,
-                                onLongPressMessage: (m) {
-                                  String msg =
-                                      "${m.user.getFullName()}: ${m.text}";
-                                  FlutterClipboard.copy(msg);
-                                  final snackBar = SnackBar(
-                                    content: Text(
-                                        "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard"),
-                                  );
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(snackBar);
-                                }),
-                            currentUser: user,
-                            typingUsers: _typingUsers,
-                            onSend: (ChatMessage m) {
-                              dlog("NEW MSG: ${m.text}");
-                              _input_tokens = 0;
-                              addMsg(m);
-                            },
-                            messages: _messages,
-                          ),
-                        )
-                      : hhhLoader("load_chat"))
-                  : buildAppSetupScreen()
-            ]))
-
-        // Center(
-        //   // Center is a layout widget. It takes a single child and positions it
-        //   // in the middle of the parent.
-        //   child: Column(
-        //     mainAxisAlignment: MainAxisAlignment.center,
-        //     children: <Widget>[mainWidget],
-        //   ),
-        // ),
-        );
-  }
-}
-
-class MyRouteInformationParser extends RouteInformationParser<String> {
-  @override
-  Future<String> parseRouteInformation(RouteInformation routeInformation) {
-    return SynchronousFuture(routeInformation.location ?? '/');
-  }
-
-  @override
-  RouteInformation restoreRouteInformation(String path) {
-    return RouteInformation(location: path);
-  }
-}
-
-class MyRouterDelegate extends RouterDelegate<String>
-    with ChangeNotifier, PopNavigatorRouterDelegateMixin<String> {
-  final GlobalKey<NavigatorState> navigatorKey;
-  final Map<String, WidgetBuilder> routes;
-  final String defaultRoute;
-
-  String _currentPath;
-
-  MyRouterDelegate({required this.routes, required this.defaultRoute})
-      : navigatorKey = GlobalKey<NavigatorState>(),
-        _currentPath = defaultRoute;
-
-  String get currentPath => _currentPath;
-
-  set currentPath(String path) {
-    _currentPath = path;
-    notifyListeners();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Navigator(
-      key: navigatorKey,
-      pages: [
-        if (routes.containsKey(currentPath))
-          MaterialPage(child: routes[currentPath]!(context)),
-        if (currentPath == defaultRoute)
-          MaterialPage(child: routes[defaultRoute]!(context)),
-      ],
-      onPopPage: (route, result) {
-        if (!route.didPop(result)) {
-          return false;
-        }
-
-        currentPath = defaultRoute;
-        return true;
-      },
-    );
-  }
-
-  @override
-  Future<void> setNewRoutePath(String path) {
-    currentPath = path;
-    return SynchronousFuture(null);
-  }
-}
-
-class MyRouter extends StatelessWidget {
-  final Map<String, WidgetBuilder> routes;
-  final String defaultRoute;
-  final MyRouterDelegate _routerDelegate;
-  final MyRouteInformationParser _routeInformationParser =
-      MyRouteInformationParser();
-
-  MyRouter({required this.routes, required this.defaultRoute})
-      : _routerDelegate =
-            MyRouterDelegate(routes: routes, defaultRoute: defaultRoute);
-
-  @override
-  Widget build(BuildContext context) {
-    return Router(
-      routerDelegate: _routerDelegate,
-      routeInformationParser: _routeInformationParser,
-    );
-  }
-}
-
-class FirstWidget extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('First Widget'),
-      ),
+                      // Find the ScaffoldMessenger in the widget tree
+                      // and use it to show a SnackBar.
+                      ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                      Timer(Duration(milliseconds: 500), () {
+                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      });
+                    }
+                  : null,
+            )
+          ],
+          toolbarHeight: 48.0),
       body: Center(
-        child: Text('This is the first widget'),
-      ),
-    );
-  }
-}
-
-class SecondWidget extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Second Widget'),
-      ),
-      body: Center(
-        child: Text('This is the second widget'),
-      ),
-    );
-  }
-}
-
-class ThirdWidget extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Third Widget'),
-      ),
-      body: Center(
-        child: Text('This is the third widget'),
-      ),
-    );
-  }
-}
-
-final SEARCH_THROTTLE = isMobile() ? 500 : 300;
-
-class SearchPage extends StatefulWidget {
-  @override
-  _SearchPageState createState() => _SearchPageState();
-}
-
-class _SearchPageState extends State<SearchPage> {
-  final TextEditingController _searchController = TextEditingController();
-  final ChatManager _chatManager = ChatManager();
-  Timer? _debounceTimer;
-  Future<List<(Chat, Message)>>? _searchResults;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController.addListener(_onSearchChanged);
-  }
-
-  @override
-  void dispose() {
-    _searchController.removeListener(_onSearchChanged);
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  void _onSearchChanged() async {
-    if (_debounceTimer?.isActive ?? false) {
-      _debounceTimer!.cancel();
-    }
-    _debounceTimer = Timer(Duration(milliseconds: SEARCH_THROTTLE), () async {
-      if (_searchController.text.isNotEmpty) {
-        setState(() {
-          _searchResults = _chatManager.searchMessages(_searchController.text,
-              prefixQuery: true);
-        });
-      } else {
-        setState(() {
-          _searchResults = null;
-        });
-      }
-    });
-  }
-
-  Widget _buildSearchResults() {
-    return FutureBuilder<List<(Chat, Message)>>(
-      future: _searchResults,
-      builder: (BuildContext context,
-          AsyncSnapshot<List<(Chat, Message)>> snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return hhhLoader("load_search");
-        } else if (snapshot.hasError) {
-          return Text('Error: ${snapshot.error}');
-        } else {
-          return ListView.builder(
-            itemCount: snapshot?.data?.length ?? 0,
-            itemBuilder: (context, index) {
-              final (chat, message) = snapshot.data![index];
-              return _buildSearchResultItem(chat, message);
-            },
-          );
-        }
-      },
-    );
-  }
-
-  Widget _buildSearchResultItem(Chat chat, Message message) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10.0),
-        border: Border.all(color: Colors.grey),
-      ),
-      child: ListTile(
-        title: Text(message.message),
-        trailing: Text(chat.getHeading()),
-        onTap: () {
-          // Callback with relevant chatId and messageId
-        },
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search message history...',
-          ),
+        // Center is a layout widget. It takes a single child and positions it
+        // in the middle of the parent.
+        child: Column(
+          // Column is also a layout widget. It takes a list of children and
+          // arranges them vertically. By default, it sizes itself to fit its
+          // children horizontally, and tries to be as tall as its parent.
+          //
+          // Column has various properties to control how it sizes itself and
+          // how it positions its children. Here we use mainAxisAlignment to
+          // center the children vertically; the main axis here is the vertical
+          // axis because Columns are vertical (the cross axis would be
+          // horizontal).
+          //
+          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
+          // action in the IDE, or press "p" in the console), to see the
+          // wireframe for each widget.
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[mainWidget],
         ),
       ),
-      body: _buildSearchResults(),
-    );
-  }
-}
-
-class RouterPage extends StatefulWidget {
-  RouterPage({Key? key, required this.title}) : super(key: key);
-
-  final String title;
-
-  @override
-  State<RouterPage> createState() => _RouterPage();
-}
-
-class _RouterPage extends State<RouterPage> {
-  late Future<AppInitParams> futureHHHDefaults;
-
-  @override
-  State<RouterPage> createState() => _RouterPage();
-
-  @override
-  void initState() {
-    super.initState();
-    futureHHHDefaults = perform_app_init();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: futureHHHDefaults,
-      builder: (BuildContext context, AsyncSnapshot<void> snapshot) {
-        if (snapshot.connectionState == ConnectionState.done) {
-          return MyRouter(
-            routes: {
-              '/active_chat': (context) => ActiveChatPage(
-                  key: const Key('active_chat'),
-                  title: widget.title,
-                  appInitParams: snapshot.data as AppInitParams),
-              '/search': (context) => SearchPage(),
-              '/history': (context) => SecondWidget(),
-              '/settings': (context) => ThirdWidget(),
-            },
-            defaultRoute: '/active_chat',
-          );
-        } else if (snapshot.connectionState == ConnectionState.none) {
-          return hhhLoader("load_router0",
-              size: MediaQuery.of(context).size.shortestSide * 0.65);
-        } else if (snapshot.hasError) {
-          return Text('Error: ${snapshot.error}');
-        } else {
-          return hhhLoader("load_router1",
-              size: MediaQuery.of(context).size.shortestSide * 0.65);
-        }
-      },
-    );
-  }
-}
-
-class HandheldHelper extends StatelessWidget {
-  const HandheldHelper({super.key});
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    var colorScheme = ColorScheme.fromSeed(
-        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
-    return MaterialApp(
-      title: 'HandHeld Helper',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        useMaterial3: true,
-      ),
-      home: RouterPage(title: 'HandHeld Helper'),
+      // floatingActionButton: FloatingActionButton(
+      //   onPressed: _incrementCounter,
+      //   tooltip: 'Increment',
+      //   child: const Icon(Icons.add),
+      // ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
@@ -2435,7 +2235,7 @@ class LifecycleObserver extends WidgetsBindingObserver {
   }
 }
 
-void main(List<String> args) {
+void main(List<String> args) async {
   if (isMobile()) {
     print("[LOG] Initializing app lifecycle observer...");
     WidgetsFlutterBinding.ensureInitialized();
@@ -2446,12 +2246,7 @@ void main(List<String> args) {
   if ((Platform.environment["DEBUG"] ?? "").isNotEmpty) {
     dlog = print;
   }
-
   dlog("CMD ARGS: ${args.join(',')}");
 
-  runApp(MaterialApp(
-    title: APP_TITLE,
-    debugShowCheckedModeBanner: false,
-    home: const HandheldHelper(),
-  ));
+  runApp(const MyApp());
 }
