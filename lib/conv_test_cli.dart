@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'conv.dart';
+import 'llm_engine.dart';
 
 Map<String, dynamic> resolve_init_json() {
   var s = String.fromEnvironment("LLAMA_INIT_JSON");

@@ -13,7 +13,7 @@ import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
-import 'conv.dart';
+import 'llm_engine.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
@@ -438,28 +438,43 @@ class LLMref {
   int size;
   Map<String, dynamic>? meta;
 
+  String getFileName() {
+    if (fileName != null) {
+      return fileName!;
+    }
+    return Path.basename(sources
+        .firstWhere((element) => element.startsWith(RegExp(r"https?://"))));
+  }
+
   LLMref(
       {required this.sources,
       required this.name,
       required this.size,
       this.meta,
-      this.fileName});
+      this.fileName}) {
+    if (fileName == null) {
+      assert(sources.isNotEmpty);
+      fileName = getFileName();
+    }
+  }
 }
 
-const DEFAULT_LLM =
-    "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf";
-const DEFAULT_LLM_FILE = "openhermes-2-mistral-7b.Q4_K_M.gguf";
-const DEFAULT_LLM_NAME = "OpenHermes-2-Mistral-7B";
-const DEFAULT_LLM_SIZE = 4368450272;
+final APPROVED_LLMS = [
+  LLMref(name: 'OpenHermes-2.5-Mistral-7B', size: 4368450304, sources: [
+    "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
+  ]),
+  LLMref(name: 'OpenHermes-2-Mistral-7B', size: 4368450272, sources: [
+    "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
+  ]),
+  LLMref(name: "TinyLLAMA-1t-OpenOrca", size: 667814368, sources: [
+    "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
+  ])
+];
 
-// const DEFAULT_LLM =
-//     "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
-// const DEFAULT_LLM_FILE = "tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
-// const DEFAULT_LLM_NAME = "TinyLLAMA-1t-OpenOrca";
-// const DEFAULT_LLM_SIZE = 667814368;
+const DEFAULT_LLM = 'OpenHermes-2.5-Mistral-7B';
 
-final defaultLLM = LLMref(
-    sources: [DEFAULT_LLM], name: DEFAULT_LLM_NAME, size: DEFAULT_LLM_SIZE);
+final defaultLLM =
+    APPROVED_LLMS.firstWhere((element) => element.name == DEFAULT_LLM);
 
 class HHHDefaults {
   final String hhh_dir;
@@ -467,7 +482,10 @@ class HHHDefaults {
   final String llm_filename;
   final int llm_size;
 
-  HHHDefaults(this.hhh_dir, this.llm_url, this.llm_filename, this.llm_size);
+  HHHDefaults(this.hhh_dir, LLMref defaultLLM)
+      : llm_url = defaultLLM.sources[0],
+        llm_filename = defaultLLM.fileName!,
+        llm_size = defaultLLM.size;
 
   Map<String, dynamic> toJson() {
     return {
@@ -614,8 +632,7 @@ Future<AppInitParams> perform_app_init() async {
     }
   }
 
-  var hhhd =
-      HHHDefaults(def_hhh_dir, DEFAULT_LLM, DEFAULT_LLM_FILE, DEFAULT_LLM_SIZE);
+  var hhhd = HHHDefaults(def_hhh_dir, defaultLLM);
 
   print("HHHDefaults: $hhhd");
 
@@ -681,21 +698,6 @@ class MyApp extends StatelessWidget {
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a blue toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: colorScheme,
         useMaterial3: true,
       ),
@@ -1176,7 +1178,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
     if (path != null) {
       setState(() {
         _controller.text = path!;
-        _path = path!;
+        _path = path;
       });
       _checkFileOrDirectoryExists();
     }
@@ -1203,7 +1205,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         decoration: BoxDecoration(
           color: _succeeded ? Colors.lightGreen[100] : Colors.red[50],
-          borderRadius: BorderRadius.all(Radius.circular(16)),
+          borderRadius: const BorderRadius.all(Radius.circular(16)),
         ),
         child: Row(
           children: [
@@ -1598,7 +1600,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                             child: Row(children: [
                               Expanded(
                                   child: Text(
-                                'Accept the data storage defaults and download the recommended LLM ($DEFAULT_LLM_NAME)',
+                                'Accept the data storage defaults and download the recommended LLM (${defaultLLM.name})',
                                 style: largeBtnFontStyle,
                               )),
                               const Icon(Icons.download_for_offline,
@@ -1613,7 +1615,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                   Row(children: [
                                     Expanded(
                                         child: Text(
-                                      'Accept the data storage defaults and download the default LLM ($DEFAULT_LLM_NAME)',
+                                      'Accept the data storage defaults and download the default LLM (${defaultLLM.name})',
                                       style: largeBtnFontStyle,
                                     )),
                                     const Icon(Icons.download_for_offline,
@@ -1831,7 +1833,11 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
 
   void addMsg(ChatMessage m, {use_polling = true}) {
     if (use_polling) {
-      var success = llm.start_advance_stream(user_msg: m.text);
+      var success = llm.start_advance_stream(
+          user_msg: m.text,
+          async_slack_ms: Platform.isAndroid
+              ? 16 /* on mobile devices, give some CPU time back to the UI */
+              : 0);
       _msg_streaming = true;
 
       setState(() {

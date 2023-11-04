@@ -1,4 +1,4 @@
-import '../lib/conv.dart';
+import '../lib/llm_engine.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -10,7 +10,8 @@ void main() {
     expect(trimLastCharacter("ab", "a"), "ab");
     expect(trimLastCharacter("<|im_end|>", "<|im_end|>"), "");
     expect(trimLastCharacter("<|im_end|>a", "<|im_end|>"), "<|im_end|>a");
-    expect(trimLastCharacter("<|im_start|><|im_end|>", "<|im_end|>"), "<|im_start|>");
+    expect(trimLastCharacter("<|im_start|><|im_end|>", "<|im_end|>"),
+        "<|im_start|>");
   });
 
   test('ChatML format fix', () {
