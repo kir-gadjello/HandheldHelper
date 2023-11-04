@@ -707,41 +707,6 @@ Future<AppInitParams> perform_app_init() async {
   return Future.value(AppInitParams(hhhd, params: rp));
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    var colorScheme = ColorScheme.fromSeed(
-        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
-    return MaterialApp(
-      title: 'HandHeld Helper',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a blue toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: colorScheme,
-        useMaterial3: true,
-      ),
-      home: MyHomePage(title: 'HandHeld Helper'),
-    );
-  }
-}
-
 // class MyHomePage extends StatefulWidget {
 //   MyHomePage({super.key, required this.title});
 //   // RootAppParams? this.root_app_params,
@@ -763,15 +728,6 @@ class MyApp extends StatelessWidget {
 //   @override
 //   State<MyHomePage> createState() => _MyHomePageState();
 // }
-
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key? key, required this.title}) : super(key: key);
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
 
 Widget hhhLoader({double size = 50}) {
   return Expanded(
@@ -804,11 +760,27 @@ Widget hhhLoader({double size = 50}) {
           ])));
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class ActiveChatPage extends StatefulWidget {
+  ActiveChatPage(
+      {Key? key,
+      required this.title,
+      appInitParams,
+      required Function(AppPage) this.navigate})
+      : super(key: key);
+
+  final Function(AppPage) navigate;
+  final String title;
+  AppInitParams? appInitParams;
+
+  @override
+  State<ActiveChatPage> createState() => _ActiveChatPageState();
+}
+
+class _ActiveChatPageState extends State<ActiveChatPage> {
   late Future<AppInitParams> futureHHHDefaults;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ActiveChatPage> createState() => _ActiveChatPageState();
 
   @override
   void initState() {
@@ -830,7 +802,8 @@ class _MyHomePageState extends State<MyHomePage> {
         } else {
           return MyHomePageContent(
               title: widget.title,
-              appInitParams: snapshot.data as AppInitParams);
+              appInitParams: snapshot.data as AppInitParams,
+              navigate: widget.navigate);
         }
       },
     );
@@ -839,9 +812,13 @@ class _MyHomePageState extends State<MyHomePage> {
 
 class MyHomePageContent extends StatefulWidget {
   MyHomePageContent(
-      {Key? key, required this.title, required this.appInitParams})
+      {Key? key,
+      required this.title,
+      required this.appInitParams,
+      required this.navigate})
       : super(key: key);
 
+  final Function(AppPage) navigate;
   final String title;
   final AppInitParams appInitParams;
 
@@ -1971,8 +1948,12 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
   }
 
   void initAIifNotAlready() {
-    if (llm.init_in_progress || llm.initialized) return;
-    if (llm.init_postponed && getAppInitParams() != null) {
+    if (llm.init_in_progress) {}
+    if (llm.initialized && !_initialized) {
+      // reentry
+      unlock_actions();
+    }
+    if (!llm.initialized && llm.init_postponed && getAppInitParams() != null) {
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) requestStoragePermission();
@@ -2094,6 +2075,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     }
 
     return Scaffold(
+      drawer: _buildDrawer(context, navigate: widget.navigate),
       appBar: AppBar(
           // TRY THIS: Try changing the color here to a specific color (to
           // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
@@ -2182,19 +2164,6 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[mainWidget],
         ),
@@ -2204,6 +2173,108 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
       //   tooltip: 'Increment',
       //   child: const Icon(Icons.add),
       // ), // This trailing comma makes auto-formatting nicer for build methods.
+    );
+  }
+}
+
+final SEARCH_THROTTLE = isMobile() ? 500 : 300;
+
+class SearchPage extends StatefulWidget {
+  final Function(AppPage) navigate;
+  SearchPage({required this.navigate});
+
+  @override
+  _SearchPageState createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final TextEditingController _searchController = TextEditingController();
+  final ChatManager _chatManager = ChatManager();
+  Timer? _debounceTimer;
+  Future<List<(Chat, Message)>>? _searchResults;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() async {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
+    _debounceTimer = Timer(Duration(milliseconds: SEARCH_THROTTLE), () async {
+      if (_searchController.text.isNotEmpty) {
+        setState(() {
+          _searchResults = _chatManager.searchMessages(_searchController.text,
+              prefixQuery: true);
+        });
+      } else {
+        setState(() {
+          _searchResults = null;
+        });
+      }
+    });
+  }
+
+  Widget _buildSearchResults() {
+    return FutureBuilder<List<(Chat, Message)>>(
+      future: _searchResults,
+      builder: (BuildContext context,
+          AsyncSnapshot<List<(Chat, Message)>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return hhhLoader();
+        } else if (snapshot.hasError) {
+          return Text('Error: ${snapshot.error}');
+        } else {
+          return ListView.builder(
+            itemCount: snapshot?.data?.length ?? 0,
+            itemBuilder: (context, index) {
+              final (chat, message) = snapshot.data![index];
+              return _buildSearchResultItem(chat, message);
+            },
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildSearchResultItem(Chat chat, Message message) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10.0),
+        border: Border.all(color: Colors.grey),
+      ),
+      child: ListTile(
+        title: Text(message.message),
+        trailing: Text(chat.getHeading()),
+        onTap: () {
+          // Callback with relevant chatId and messageId
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      drawer: _buildDrawer(context, navigate: widget.navigate),
+      appBar: AppBar(
+        title: TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'Search message history...',
+          ),
+        ),
+      ),
+      body: _buildSearchResults(),
     );
   }
 }
@@ -2235,6 +2306,155 @@ class LifecycleObserver extends WidgetsBindingObserver {
   }
 }
 
+enum AppPage {
+  conversation,
+  settings,
+  search,
+  history,
+  help,
+}
+
+String getPageName(AppPage page, {capitalize = false}) => capitalize
+    ? capitalizeAllWord(page.toString().split(".").last)
+    : page.toString().split(".").last;
+
+AppPage global_current_page = AppPage.conversation;
+
+List<AppPage> _app_pages = [
+  AppPage.conversation,
+  AppPage.search,
+  AppPage.history,
+  AppPage.settings,
+  AppPage.help,
+];
+
+String capitalizeAllWord(String value) {
+  var result = value[0].toUpperCase();
+  for (int i = 1; i < value.length; i++) {
+    if (value[i - 1] == " ") {
+      result = result + value[i].toUpperCase();
+    } else {
+      result = result + value[i];
+    }
+  }
+  return result;
+}
+
+Drawer _buildDrawer(BuildContext context, {navigate}) {
+  return Drawer(
+      child: Container(
+    child: ListView(
+      children: _app_pages.map((page) {
+        final selected = page == global_current_page;
+        final textStyle = TextStyle(
+            color: selected
+                ? Colors.white
+                : Theme.of(context).colorScheme.inversePrimary,
+            fontSize: 28);
+        return ListTile(
+          selected: selected,
+          titleTextStyle: textStyle,
+          tileColor: selected ? Colors.lightBlueAccent : Colors.white,
+          title: Text(getPageName(page, capitalize: true)),
+          onTap: () {
+            navigate(page);
+          },
+        );
+      }).toList(),
+    ),
+  ));
+}
+
+class PseudoRouter extends StatefulWidget {
+  final AppInitParams appInitParams;
+  PseudoRouter(this.appInitParams);
+
+  @override
+  _PseudoRouter createState() => _PseudoRouter();
+}
+
+class _PseudoRouter extends State<PseudoRouter> {
+  AppPage _currentPage = AppPage.conversation;
+
+  void navigate(AppPage page) {
+    setState(() {
+      global_current_page = page;
+      _currentPage = page;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_currentPage) {
+      case AppPage.conversation:
+        return ActiveChatPage(
+            title: APP_TITLE,
+            appInitParams: widget.appInitParams,
+            navigate: navigate);
+      case AppPage.settings:
+        return SearchPage(navigate: navigate);
+      case AppPage.search:
+        return SearchPage(navigate: navigate);
+      case AppPage.history:
+        return SearchPage(navigate: navigate);
+      case AppPage.help:
+        return SearchPage(navigate: navigate);
+      default:
+        return ActiveChatPage(
+            title: APP_TITLE,
+            appInitParams: widget.appInitParams,
+            navigate: navigate);
+    }
+  }
+}
+
+class AppStartup extends StatefulWidget {
+  @override
+  _AppStartupState createState() => _AppStartupState();
+}
+
+class _AppStartupState extends State<AppStartup> {
+  Future? _appInitFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _appInitFuture = perform_app_init();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+        future: _appInitFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return hhhLoader(
+                size: MediaQuery.of(context).size.shortestSide * 0.65);
+          }
+          return PseudoRouter(snapshot.data!);
+        });
+  }
+}
+
+class HandheldHelper extends StatelessWidget {
+  const HandheldHelper({super.key});
+  // This widget is the root of your application.
+  @override
+  Widget build(BuildContext context) {
+    var colorScheme = ColorScheme.fromSeed(
+        seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
+    return MaterialApp(
+      title: 'HandHeld Helper',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: colorScheme,
+        useMaterial3: true,
+      ),
+      home: AppStartup(),
+    );
+  }
+}
+
 void main(List<String> args) async {
   if (isMobile()) {
     print("[LOG] Initializing app lifecycle observer...");
@@ -2248,5 +2468,5 @@ void main(List<String> args) async {
   }
   dlog("CMD ARGS: ${args.join(',')}");
 
-  runApp(const MyApp());
+  runApp(const HandheldHelper());
 }
