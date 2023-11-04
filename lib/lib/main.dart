@@ -2269,7 +2269,7 @@ class _SearchPageState extends State<SearchPage> {
       appBar: AppBar(
         title: TextField(
           controller: _searchController,
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             hintText: 'Search message history...',
           ),
         ),
@@ -2278,6 +2278,245 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 }
+//
+// class SearchResultBubble extends StatefulWidget {
+//   final String searchQuery;
+//   final String text;
+//   final Color highlightColor;
+//   final int maxNLines;
+//   final Color backgroundColor;
+//   final Color textColor;
+//   final double textSize;
+//   final Color hoverColor;
+//
+//   const SearchResultBubble({
+//     Key? key,
+//     required this.searchQuery,
+//     required this.text,
+//     this.highlightColor = Colors.yellow,
+//     this.maxNLines = 5,
+//     this.backgroundColor = Colors.white,
+//     this.textColor = Colors.black,
+//     this.textSize = 14.0,
+//     this.hoverColor = Colors.grey,
+//   }) : super(key: key);
+//
+//   @override
+//   _SearchResultBubbleState createState() => _SearchResultBubbleState();
+// }
+//
+// class _SearchResultBubbleState extends State<SearchResultBubble> {
+//   String? _highlightedText;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _highlightText();
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return InkWell(
+//       onTap: () {},
+//       child: Container(
+//         padding: EdgeInsets.symmetric(
+//           vertical: 8.0,
+//           horizontal: MediaQuery.of(context).size.width * 0.1,
+//         ),
+//         decoration: BoxDecoration(
+//           color: widget.backgroundColor,
+//           borderRadius: BorderRadius.circular(16.0),
+//         ),
+//         child: Column(
+//           crossAxisAlignment: CrossAxisAlignment.start,
+//           children: [
+//             Text(
+//               _highlightedText ?? "",
+//               style: TextStyle(
+//                 color: widget.textColor,
+//                 fontSize: widget.textSize,
+//               ),
+//             ),
+//             if (widget.maxNLines > 1) SizedBox(height: 4.0),
+//             ...List.generate(
+//               widget.maxNLines - 1,
+//               (index) => Text(
+//                 '...',
+//                 style: TextStyle(
+//                   color: widget.textColor,
+//                   fontSize: widget.textSize,
+//                 ),
+//               ),
+//             )
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+//
+//   void _highlightText() {
+//     final RegExp regex = RegExp(widget.searchQuery, caseSensitive: false);
+//     setState(() {
+//       _highlightedText = widget.searchQuery;
+//       if (regex.hasMatch(_highlightedText!)) {
+//         _highlightedText = _highlightedText!.replaceAll(
+//           regex.firstMatch(),
+//           '<b style="color: ${widget.highlightColor}">${regex.firstMatch()}</b>',
+//         );
+//       }
+//     });
+//   }
+// }
+//
+// class _SearchResultBubble2State extends State<SearchResultBubble2> {
+//   Color _backgroundColor;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _backgroundColor = widget.backgroundColor;
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return GestureDetector(
+//       onTap: widget.onTap,
+//       onTapDown: (_) => setState(() => _backgroundColor = widget.hoverColor),
+//       onTapUp: (_) => setState(() => _backgroundColor = widget.backgroundColor),
+//       onTapCancel: () =>
+//           setState(() => _backgroundColor = widget.backgroundColor),
+//       child: Container(
+//         padding: widget.padding,
+//         decoration: BoxDecoration(
+//           color: _backgroundColor,
+//           borderRadius: BorderRadius.circular(16.0),
+//         ),
+//         child: SelectableText(
+//           widget.documentText
+//               .replaceAll(widget.searchQuery, '**${widget.searchQuery}**'),
+//           style: TextStyle(
+//             color: widget.textColor,
+//             fontSize: 16.0,
+//           ),
+//           onTap: () {},
+//           selectionControls: MaterialSelectionControls(),
+//           selectionColor: widget.highlightColor,
+//           maxLines: widget.maxLines,
+//           overflow: TextOverflow.ellipsis,
+//         ),
+//       ),
+//     );
+//   }
+// }
+//
+// class SearchMessagesWidget extends StatefulWidget {
+//   final ChatManager _chatManager;
+//
+//   SearchMessagesWidget(this._chatManager);
+//
+//   @override
+//   _SearchMessagesWidgetState createState() => _SearchMessagesWidgetState();
+// }
+//
+// class _SearchMessagesWidgetState extends State<SearchMessagesWidget> {
+//   TextEditingController _searchController = TextEditingController();
+//   FocusNode _searchFocusNode = FocusNode();
+//   Timer? _debounce;
+//   String _searchQuery = '';
+//   bool _isLoading = false;
+//   List<(Chat, Message)> _searchResults = [];
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _searchFocusNode.addListener(_onSearchFocusChange);
+//   }
+//
+//   @override
+//   void dispose() {
+//     _searchController.dispose();
+//     _searchFocusNode.dispose();
+//     super.dispose();
+//   }
+//
+//   void _onSearchFocusChange() {
+//     setState(() {
+//       if (_searchFocusNode.hasFocus) {
+//         _searchQuery = _searchController.text;
+//         if (_debounce?.isActive ?? false) _debounce!.cancel();
+//         _debounce = Timer(const Duration(milliseconds: 300), () async {
+//           setState(() => _isLoading = true);
+//           final results = await widget._chatManager
+//               .searchMessages(_searchQuery, prefixQuery: true);
+//           setState(() {
+//             _searchResults = results;
+//             _isLoading = false;
+//           });
+//         });
+//       }
+//     });
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(
+//           title: TextField(
+//               controller: _searchController, focusNode: _searchFocusNode)),
+//       body: Column(children: [
+//         if (_isLoading) const Center(child: CircularProgressIndicator()),
+//         Expanded(
+//           child: ListView.builder(
+//             itemCount: _searchResults.length + 1, // +1 for "No results" message
+//             itemBuilder: (BuildContext context, int index) {
+//               if (index == _searchResults.length) {
+//                 return const ListTile(title: Text("No results"));
+//               } else {
+//                 final Chat chat = _searchResults[index].item1;
+//                 final Message message = _searchResults[index].item2;
+//                 return ListTile(
+//                     title:
+//                         Text(_chatMessagePreview(_searchQuery, chat, message)),
+//                     onTap: () async {
+//                       final chatId = chat.uuid;
+//                       final messageId = message.uuid;
+//                       final chat = await widget._chatManager.getChat(chatId);
+//                       final messages =
+//                           await widget._chatManager.getMessagesFromChat(chatId);
+//                       if (chat != null && messages.isNotEmpty) {
+//                         Navigator.of(context)
+//                             .push(_createChatViewRoute(chat, messages));
+//                       }
+//                     });
+//               }
+//             },
+//           ),
+//         )
+//       ]),
+//     );
+//   }
+//
+//   Route _createChatViewRoute(Chat chat, List<Message> messages) {
+//     return PageRouteBuilder(
+//         pageBuilder: (context, animation, secondaryAnimation) =>
+//             ChatView(chat, messages),
+//         transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+//             FadeTransition(opacity: animation, child: child),
+//         transitionDuration: const Duration(milliseconds: 400));
+//   }
+//
+//   String _chatMessagePreview(String searchQuery, Chat chat, Message message) {
+//     final chatTitle = chat.title ??
+//         'Chat from ${DateTime.fromMillisecondsSinceEpoch(chat.date * 1000)}';
+//     final messageText = message.message;
+//     final queryHighlightStart = messageText.indexOf(searchQuery);
+//     final queryHighlightEnd = queryHighlightStart + searchQuery.length;
+//     final chatNameAndTime =
+//         '[$chatTitle] ${DateTime.fromMillisecondsSinceEpoch(message.date * 1000)}';
+//     return '$chatNameAndTime\n$messageText\n'.replaceRange(queryHighlightStart,
+//         queryHighlightEnd, '<highlight>$searchQuery</highlight>', 0);
+//   }
+// }
 
 class LifecycleObserver extends WidgetsBindingObserver {
   @override
