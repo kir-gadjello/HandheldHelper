@@ -335,7 +335,7 @@ class Chat {
     int? date,
     Uuid? uuid,
     required this.clientUuid,
-    required this.title,
+    this.title,
     Map<String, dynamic>? meta,
     int? lastMsgIndex,
   })  : date = date ?? getUnixTime(),
@@ -461,6 +461,11 @@ class DatabaseHelper {
     }
   }
 
+  Future<void> optimize() async {
+    final db = await database;
+    return db.execute("ANALYZE; PRAGMA optimize;");
+  }
+
   Future<List<String>> getTables() async {
     final db = await database;
     final List<Map<String, dynamic>> results = await db
@@ -499,6 +504,12 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE INDEX idx_messages_username ON messages(username);
+      CREATE INDEX idx_messages_date ON messages(date);
+      CREATE INDEX idx_messages_chat_uuid ON messages(chat_uuid);
+    ''');
+
     // Create FTS4 index for "messages" table
     await createFtsIndex(db, 'messages', ['message']);
 
@@ -514,10 +525,16 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE INDEX idx_chats_client_uuid ON chats(client_uuid);
+      CREATE INDEX idx_chats_date ON chats(date);
+      CREATE INDEX idx_chats_title ON chats(title);
+    ''');
+
 // Create "metadata" table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS metadata (
-        key TEXT,
+        key TEXT NOT NULL PRIMARY KEY,
         value JSON
       )
     ''');
@@ -557,7 +574,7 @@ class ChatManager {
     return await _databaseHelper.getTables();
   }
 
-  Future<Chat> createChat(String title) async {
+  Future<Chat> createChat(String? title) async {
     final db = await _databaseHelper.database;
 // final chatCount = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM chats')) ?? 0;
     var chat =
@@ -760,12 +777,29 @@ class ChatManager {
 class MetadataManager {
   final DatabaseHelper _databaseHelper = DatabaseHelper();
 
-  Future<void> setMetadata(String key, dynamic value) async {
+  Future<void> setMetadata(String key, dynamic value,
+      {String? subspace}) async {
     final db = await _databaseHelper.database;
-    await db.insert('metadata', {
-      'key': key,
-      'value': value,
-    });
+    await db.rawInsert(
+      'INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)',
+      [
+        (subspace == null) ? key : "__${subspace}__${key}",
+        value,
+      ],
+    );
+  }
+
+  Future<dynamic> getMetadataCollection(String subspace, String key) async {
+    final db = await _databaseHelper.database;
+
+    final List<Map<String, dynamic>> results = await db.query(
+      'metadata',
+      columns: ['value'],
+      where: 'key LIKE ?',
+      whereArgs: ["__${subspace}__%"],
+    );
+
+    return results;
   }
 
   Future<dynamic> getMetadata(String key) async {

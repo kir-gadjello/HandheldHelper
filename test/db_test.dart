@@ -171,4 +171,44 @@ void main() async {
       expect(chatsAndMessages3, everyElement(isA<(Chat, Message)>()));
     });
   });
+
+  group('MetadataManager', () {
+    late MetadataManager metadataManager;
+
+    setUpAll(() async {
+      metadataManager = MetadataManager();
+      // Initialize the database or any setup required
+    });
+
+    test('setMetadata inserts metadata into the database', () async {
+      final key = 'testKey';
+      final value = 'testValue';
+      await metadataManager.setMetadata(key, value);
+
+      final result = await metadataManager.getMetadata(key);
+      expect(result, value);
+    });
+
+    test('getMetadataCollection retrieves all metadata in a subspace',
+        () async {
+      // Set up some metadata in a subspace
+      final subspace = 'testSubspace';
+      await metadataManager.setMetadata('key1', 'value1', subspace: subspace);
+      await metadataManager.setMetadata('key2', 'value2', subspace: subspace);
+
+      final results =
+          await metadataManager.getMetadataCollection(subspace, 'key1');
+      expect(results.map((r) => r['value']), contains('value1'));
+      expect(results.map((r) => r['value']), contains('value2'));
+    });
+
+    test('getMetadata retrieves metadata by key', () async {
+      final key = 'testKey';
+      final value = 'testValue';
+      await metadataManager.setMetadata(key, value);
+
+      final result = await metadataManager.getMetadata(key);
+      expect(result, value);
+    });
+  });
 }

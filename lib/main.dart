@@ -1755,6 +1755,18 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
 
 LLMEngine llm = LLMEngine();
 
+class ChatState {
+  final Chat chat_data;
+  final List<Message> msgs = [];
+  Map<String, dynamic>? meta;
+
+  ChatState(this.chat_data, {Map<String, dynamic>? meta});
+
+  advance(String user_msg, LLMEngine llm) {}
+
+  abort() {}
+}
+
 class _MyHomePageContentState extends State<MyHomePageContent> {
   late ChatManager chatManager;
 
@@ -2278,7 +2290,7 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 }
-//
+
 // class SearchResultBubble extends StatefulWidget {
 //   final String searchQuery;
 //   final String text;
