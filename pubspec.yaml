@@ -62,6 +62,7 @@ dev_dependencies:
   ffigen: ^9.0.1
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -123,3 +124,11 @@ ffigen:
     include-directives:
       - '**rpcserver.h'
   comments: false
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/handheld_helper_launcher_icon_v1.png"
+  macos:
+    generate: true
+    image_path: "assets/handheld_helper_launcher_icon_v1.png"

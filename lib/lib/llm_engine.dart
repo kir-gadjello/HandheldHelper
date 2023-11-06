@@ -1,6 +1,7 @@
 import 'dart:convert' show jsonEncode, jsonDecode;
 import 'dart:ffi' as ffi;
 import 'dart:io' show File, Directory, Platform, FileSystemEntity;
+import 'dart:ui';
 import 'package:path/path.dart' as Path;
 import 'package:ffi/ffi.dart';
 import 'dart:async';
@@ -229,7 +230,6 @@ String? resolve_shared_library_path(String libname) {
 const LIBLLAMARPC = "librpcserver";
 
 class LLMEngine {
-  String system_message = "";
   String? libpath = "$LLAMA_SO";
   String modelpath = "";
   String error = "";
@@ -254,7 +254,6 @@ class LLMEngine {
 
   LLMEngine(
       {this.postpone_init = false,
-      this.system_message = "",
       this.libpath,
       this.modelpath = "",
       this.onInitDone,
@@ -298,7 +297,6 @@ class LLMEngine {
     }
 
     reinit(
-        system_message: system_message,
         modelpath: modelpath,
         onInitDone: onInitDone,
         llama_init_json: llama_init_json);
@@ -341,8 +339,7 @@ class LLMEngine {
   }
 
   bool reinit(
-      {String? system_message,
-      required String modelpath,
+      {required String modelpath,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
       onInitDone}) {
@@ -350,23 +347,11 @@ class LLMEngine {
       teardown();
     }
 
-    if (system_message != null) {
-      this.system_message = system_message;
-    }
-
     this.modelpath = modelpath;
 
     msgs = [];
 
     try {
-      if (this.system_message.isNotEmpty) {
-        msgs.add(AIChatMessage("system", this.system_message));
-        _sync_token_count();
-        if (kDebugMode) {
-          print("Using system prompt: \"${this.system_message}\"");
-        }
-      }
-
       var t0 = DateTime.now();
 
       Map<String, dynamic> init_json = {
@@ -439,15 +424,28 @@ class LLMEngine {
     return true;
   }
 
-  void clear_state() {
+  void clear_state({VoidCallback? onComplete}) {
     print("AiDialog: clear_state");
     msgs = [];
-    if (system_message.isNotEmpty) {
-      msgs.add(AIChatMessage("system", system_message));
-      _sync_token_count();
-      if (kDebugMode) {
-        print("Using system prompt: \"${system_message}\"");
+
+    if (streaming) {
+      initialized = false;
+      init_in_progress = true;
+      if (onComplete != null) {
+        cancel_advance_stream(onComplete: () {
+          initialized = true;
+          init_in_progress = false;
+          streaming = false;
+          onComplete();
+        });
       }
+    }
+
+    if (onComplete != null) {
+      initialized = true;
+      init_in_progress = false;
+      streaming = false;
+      onComplete();
     }
   }
 
@@ -613,6 +611,30 @@ class LLMEngine {
     }
 
     return AIChatPollResult();
+  }
+
+  Future<bool> cancel_advance_stream({VoidCallback? onComplete}) async {
+    String api_query = "{}";
+
+    final api_resp = rpc
+        .async_completion_cancel(api_query.toNativeUtf8().cast<ffi.Char>())
+        .cast<Utf8>()
+        .toDartString();
+
+    if (onComplete == null) {
+      var resp = jsonDecode(api_resp);
+      return (resp != null && (resp?['success'] == true)) ? true : false;
+    } else {
+      AIChatPollResult poll_res;
+      int counter = 20;
+      do {
+        await Future.delayed(const Duration(milliseconds: 100));
+        counter--;
+        poll_res = poll_advance_stream();
+      } while (counter > 0 && !poll_res.finished);
+      onComplete();
+      return true;
+    }
   }
 
   void teardown() {

@@ -25,12 +25,15 @@ Map<String, dynamic> resolve_init_json() {
 
 void main() async {
   var d = LLMEngine(
-      system_message:
-          "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.",
       libpath: "./native/librpcserver.dylib",
       modelpath: Platform.environment["MODELPATH"] ??
           "/Users/LKE/projects/AI/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf",
       llama_init_json: resolve_init_json());
+
+  d.msgs = [
+    AIChatMessage("assistant",
+        "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.")
+  ];
 
   stdout.write("Loading");
 

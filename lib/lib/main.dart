@@ -741,34 +741,33 @@ Future<AppInitParams> perform_app_init() async {
 // }
 
 Widget hhhLoader({double size = 50}) {
-  return Expanded(
-      child: Container(
-          color: Colors.white,
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Stack(alignment: Alignment.center, children: [
-              Center(
-                  child: Padding(
-                      padding: EdgeInsets.only(right: 0.25 * size / 10),
-                      child: Text(
-                        textAlign: TextAlign.center,
-                        "HHH",
-                        style: TextStyle(
-                            fontSize: size / 10,
-                            color: Colors.lightBlue.shade200,
-                            fontStyle: FontStyle.italic,
-                            decoration: TextDecoration.none,
-                            fontWeight: FontWeight.bold),
-                      ))),
-              Center(
-                  child: Padding(
-                      padding: EdgeInsets.all(size / 10),
-                      child: GFLoader(
-                        type: GFLoaderType.ios,
-                        size: size,
-                        loaderstrokeWidth: 4.0,
-                      )))
-            ])
-          ])));
+  return Container(
+      color: Colors.white,
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Stack(alignment: Alignment.center, children: [
+          Center(
+              child: Padding(
+                  padding: EdgeInsets.only(right: 0.25 * size / 10),
+                  child: Text(
+                    textAlign: TextAlign.center,
+                    "HHH",
+                    style: TextStyle(
+                        fontSize: size / 10,
+                        color: Colors.lightBlue.shade200,
+                        fontStyle: FontStyle.italic,
+                        decoration: TextDecoration.none,
+                        fontWeight: FontWeight.bold),
+                  ))),
+          Center(
+              child: Padding(
+                  padding: EdgeInsets.all(size / 10),
+                  child: GFLoader(
+                    type: GFLoaderType.ios,
+                    size: size,
+                    loaderstrokeWidth: 4.0,
+                  )))
+        ])
+      ]));
 }
 
 class ActiveChatPage extends StatefulWidget {
@@ -1486,7 +1485,8 @@ class _AppSetupForm extends State<AppSetupForm> {
     });
   }
 
-  Future<bool> _checkLLMfile() async {
+  Future<bool> _checkLLMfile(
+      {try_downloads_dir = false, move_from_dir = false}) async {
     final hhh_dir = widget.resolved_defaults.hhh_dir;
 
     final llm_url = widget.resolved_defaults.llm_url;
@@ -1495,6 +1495,11 @@ class _AppSetupForm extends State<AppSetupForm> {
         widget.resolved_defaults.hhh_dir,
         HHH_MODEL_SUBDIR,
         Path.basename(llm_url)));
+
+    if (try_downloads_dir) {
+      // TODO
+      print("Attempting to find LLM file at user Downloads directory");
+    }
 
     var llm_file_exists = await File(hhh_llm_dl_path).exists();
     var llm_file_can_be_opened = false;
@@ -1838,7 +1843,17 @@ LLMEngine llm = LLMEngine();
 //   abort() {}
 // }
 
-class ActiveChatDialogState extends State<ActiveChatDialog> {
+List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
+  return msgs
+      .map((m) => ChatMessage(
+          user: getChatUserByName(m.username),
+          text: m.message,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(m.date * 1000)))
+      .toList();
+}
+
+class ActiveChatDialogState extends State<ActiveChatDialog>
+    with WidgetsBindingObserver {
   ChatManager chatManager = ChatManager();
   MetadataManager metaKV = MetadataManager();
 
@@ -1861,13 +1876,32 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
   @override
   void initState() {
     super.initState();
+    if (isMobile()) WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (isMobile() && state == AppLifecycleState.paused) {
+      print("ANDROID: The app is about to be suspended, persisting...");
+      _cancel_timers();
+      persistState();
+    }
   }
 
   @override
   void dispose() {
     print("ActiveChatDialogState: attempting to persist state...");
+    _cancel_timers();
     persistState();
     super.dispose();
+  }
+
+  _cancel_timers() {
+    if (_msg_poll_timer?.isActive ?? false) {
+      print(
+          "WARNING, PERSISTING DURING AI MESSAGE STREAMING, CANCELING POLLING");
+      _msg_poll_timer?.cancel();
+    }
   }
 
   void lock_actions() {
@@ -1953,30 +1987,44 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
       '_initialized': _initialized,
       '_input_tokens': _input_tokens,
       '_last_chat_persist': _last_chat_persist?.millisecondsSinceEpoch ?? null,
-      'chat': _current_chat?.toJson(),
-      'messages': msgs_toJsonMap()
+      'chat_uuid': _current_chat?.uuid.toJson(),
     };
+
+    if (_msg_streaming && llm.streaming) {
+      ret['_ai_msg_stream_acc'] = _messages[0].text;
+    }
     print("SERIALIZED_CHAT: $ret");
     return ret;
   }
 
-  bool fromJson(Map<String, dynamic> json) {
-    if (json['chat'] != null && json['messages'] != null) {
-      var restored_messages = msgs_fromJson(jsonObject: json['messages']);
-      if (restored_messages.isEmpty) {
-        print("No messages retrieved");
-        return false;
-      }
-
+  Future<bool> fromJson(Map<String, dynamic> json) async {
+    if (json['chat_uuid'] != null) {
       _msg_streaming = json['_msg_streaming'] ?? false;
       _initialized = json['_initialized'] ?? false;
       _input_tokens = json['_input_tokens'] ?? 0;
       _last_chat_persist = (json['_last_chat_persist'] != null)
           ? DateTime.fromMillisecondsSinceEpoch(json['_last_chat_persist'])
           : null;
-      _current_chat = Chat.fromJson(json['chat']);
 
-      print("CURRENT CHAT: ${_current_chat?.toJson()}");
+      var chat_uuid = Uuid.fromJson(json['chat_uuid']);
+      print("CURRENT CHAT UUID: $chat_uuid");
+
+      _current_chat = await chatManager.getChat(chat_uuid);
+      if (_current_chat == null) {
+        print("No chat retrieved");
+        return false;
+      }
+
+      print("CURRENT CHAT UUID: ${_current_chat?.toJson()}");
+
+      // var restored_messages = msgs_fromJson(jsonObject: json['messages']);
+      var restored_messages = dbMsgsToDashChatMsgs(await chatManager
+          .getMessagesFromChat(_current_chat!.uuid, reversed: true));
+
+      if (restored_messages.isEmpty) {
+        print("No messages retrieved");
+        return false;
+      }
 
       _messages = restored_messages;
       sync_messages_to_llm();
@@ -1993,9 +2041,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
 
   Future<bool> persistState() async {
     try {
+      _last_chat_persist = DateTime.now();
       var json = toJson();
       await metaKV.setMetadata("_persist_active_chat_state", json);
-      _last_chat_persist = DateTime.now();
     } catch (e) {
       print("Exception in ActiveChatDialogState.persistState: $e");
       return false;
@@ -2010,7 +2058,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
     var restored = false;
 
     try {
-      restored = fromJson(data);
+      restored = await fromJson(data);
     } catch (e) {
       print("Exception while restoring chat from db: $e");
       print("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
@@ -2025,7 +2073,27 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
       // The restored state might not have finished if the persist happened mid of
       // AI writing an answer, we must handle this case and might need to restart polling timer
       if (_msg_streaming) {
-        /* TODO ... */
+        var partial_answer = data['_ai_msg_stream_acc'];
+        if (partial_answer is String && partial_answer.isNotEmpty) {
+          print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
+
+          /* for now we just add this as a message with metadata _interrupted = true
+          and restore the state to initial TODO ... */
+          _msg_streaming = false;
+
+          if (llm.streaming) {
+            lock_actions();
+            llm.clear_state(onComplete: () async {
+              await addMessageToActiveChat("ai", partial_answer,
+                  meta: {"_interrupted": true});
+              unlock_actions();
+            });
+          } else {
+            await addMessageToActiveChat("ai", partial_answer,
+                meta: {"_interrupted": true});
+            setState(() {});
+          }
+        }
       }
     }
 
@@ -2048,11 +2116,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
     _current_chat = await chatManager.createChat(
         firstMessageText: firstMsg.text, firstMessageUsername: "SYSTEM");
 
+    _messages = [firstMsg];
+    sync_messages_to_llm();
+
     setState(() {
       _msg_streaming = false;
       _input_tokens = 0;
       _last_chat_persist = null;
-      _messages = [firstMsg];
     });
   }
 
@@ -2064,6 +2134,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
       await create_new_chat();
       return _current_chat!;
     }
+  }
+
+  Future<void> addMessageToActiveChat(String username, String msg,
+      {Map<String, dynamic>? meta}) async {
+    Chat current = await getCurrentChat();
+    chatManager.addMessageToChat(current.uuid, msg, username, meta: meta);
+    var cmsg = ChatMessage(
+        user: getChatUserByName(username),
+        createdAt: DateTime.now(),
+        text: msg);
+    _messages.insert(0, cmsg);
   }
 
   Future<void> updateStreamingMsgView() async {
@@ -2105,10 +2186,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
     });
   }
 
-  Future<void> addMsg(ChatMessage m) async {
+  Future<void> addMsg(ChatMessage m, {Map<String, dynamic>? meta}) async {
     Chat current = await getCurrentChat();
 
-    await chatManager.addMessageToChat(current.uuid, m.text, "user");
+    await chatManager.addMessageToChat(current.uuid, m.text, "user",
+        meta: meta);
     await metaKV.setMetadata("_msg_stream_in_progress_", {
       'chat_uuid': current.uuid,
       'partial_msg': '',
@@ -2200,7 +2282,6 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
       if (Platform.isAndroid) requestStoragePermission();
       llm.reinit(
           modelpath: resolve_llm_file(p),
-          system_message: hermes_sysmsg,
           llama_init_json: resolve_init_json(),
           onInitDone: () {
             print("ActiveChatDialogState: attempting to restore state...");
@@ -2331,12 +2412,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog> {
           // Here we take the value from the MyHomePage object that was created by
           // the App.build method, and use it to set our appbar title.
           title: Row(children: [
-            Expanded(
-                child: Text(
-              "${widget.title}",
-              style:
-                  TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
-            )),
+            if (!isMobile())
+              const Expanded(
+                  child: Text(
+                "HHH",
+                style:
+                    TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
+              )),
             Text(
               "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
               style: TextStyle(
@@ -2954,6 +3036,44 @@ class _AppStartupState extends State<AppStartup> {
 
 class HandheldHelper extends StatelessWidget {
   const HandheldHelper({super.key});
+
+  ThemeData getAppTheme(BuildContext context, bool isDarkTheme) {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100),
+      scaffoldBackgroundColor: isDarkTheme ? Colors.black : Colors.white,
+      textTheme: Theme.of(context)
+          .textTheme
+          .copyWith(
+            titleSmall:
+                Theme.of(context).textTheme.titleSmall?.copyWith(fontSize: 11),
+          )
+          .apply(
+            bodyColor: isDarkTheme ? Colors.white : Colors.black,
+            displayColor: Colors.grey,
+          ),
+      switchTheme: SwitchThemeData(
+        thumbColor: MaterialStateProperty.all(
+            isDarkTheme ? Colors.orange : Colors.purple),
+      ),
+      listTileTheme: ListTileThemeData(
+          iconColor: isDarkTheme ? Colors.orange : Colors.purple),
+      appBarTheme: AppBarTheme(
+          backgroundColor: isDarkTheme ? Colors.black : Colors.white,
+          iconTheme: IconThemeData(
+              color: isDarkTheme ? Colors.white : Colors.black54)),
+    );
+  }
+
+  // ThemeMode _themeMode = ThemeMode.system;
+  //
+  // void changeTheme(ThemeMode themeMode) {
+  //   setState(() {
+  //     _themeMode = themeMode;
+  //   });
+  // }
+
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
@@ -2962,10 +3082,13 @@ class HandheldHelper extends StatelessWidget {
     return MaterialApp(
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        useMaterial3: true,
-      ),
+
+      theme: getAppTheme(context, false),
+
+      //theme: ThemeData(
+      //   colorScheme: colorScheme,
+      //   useMaterial3: true,
+      // ),
       home: AppStartup(),
     );
   }

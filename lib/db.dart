@@ -161,13 +161,13 @@ class Uuid {
   }
 
   Map<String, dynamic> toJson() {
-    return {'bytes': toBytes()};
+    return {'_uuid': toBytes()};
   }
 
   factory Uuid.fromJson(Map<String, dynamic> json) {
-    final dynamicList = json['bytes'] as List<dynamic>;
+    final dynamicList = json['_uuid'] as List<dynamic>;
     final List<int> bytes = dynamicList.map((item) => item as int).toList();
-    print("UUID BYTES: ${json['bytes']} => $bytes, Uuid(...) = ${Uuid(bytes)}");
+    print("UUID BYTES: ${json['_uuid']} => $bytes, Uuid(...) = ${Uuid(bytes)}");
     return Uuid(bytes);
   }
 
@@ -770,11 +770,14 @@ class ChatManager {
     return results.map((result) => Chat.fromJson(result)).toList();
   }
 
-  Future<List<Message>> getMessagesFromChat(Uuid chatId) async {
+  Future<List<Message>> getMessagesFromChat(Uuid chatId,
+      {reversed = false}) async {
     final db = await _databaseHelper.database;
 
+    var ordering = reversed ? "DESC" : "ASC";
+
     var query = '''
-    SELECT * FROM messages WHERE chat_uuid = ?
+    SELECT * FROM messages WHERE chat_uuid = ? ORDER BY message_index $ordering;
   ''';
 
     var args = [chatId.toBytes()];
