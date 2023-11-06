@@ -5,10 +5,9 @@ import 'package:ffi/ffi.dart';
 import 'dart:isolate';
 import 'dart:async';
 import 'package:async/async.dart';
-import '../lib/conv.dart';
+import '../lib/llm_engine.dart';
 import '../lib/isolate_rpc.dart';
 import 'package:test/test.dart';
-
 
 // Spawns an isolate and asynchronously sends a list of filenames for it to
 // read and decode. Waits for the response containing the decoded JSON
@@ -67,7 +66,8 @@ class StatefulProcessor<T, U> extends StatefulRPCProcessor<T, U> {
   // Define state variables here
   int _counter = 1;
 
-  @override FutureOr<U> process(T data) {
+  @override
+  FutureOr<U> process(T data) {
     _counter += (data as int);
     return (_counter) as FutureOr<U>;
   }
@@ -80,7 +80,7 @@ void main() async {
         processorFactory: () => StatefulProcessor<int, int>(),
         // the execution logics, i.e. this is a plus one operation
         debugName: "rpc" // this will be used as the Isolate name
-    );
+        );
     expect((await rpc.execute(1)).result, 2);
     expect((await rpc.execute(0)).result, 2);
     expect((await rpc.execute(1)).result, 3);

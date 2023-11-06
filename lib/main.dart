@@ -13,16 +13,13 @@ import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
-import 'conv.dart';
+import 'llm_engine.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
 import 'package:external_path/external_path.dart';
-
-bool isMobile() => Platform.isAndroid;
-bool isDevelopment() =>
-    const String.fromEnvironment("DEVELOPMENT", defaultValue: "").isNotEmpty;
+import 'util.dart';
 
 final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
 
@@ -423,6 +420,20 @@ final ChatUser user_ai = ChatUser(
   firstName: 'AI',
 );
 
+ChatUser getChatUserByName(String? name) {
+  switch (name?.toLowerCase() ?? "") {
+    case "system":
+      return user_SYSTEM;
+    case "user":
+      return user;
+    case "ai":
+      return user_ai;
+
+    default:
+      return user;
+  }
+}
+
 class RootAppParams {
   String hhh_dir;
   String default_model;
@@ -765,10 +776,10 @@ class ActiveChatPage extends StatefulWidget {
       {Key? key,
       required this.title,
       appInitParams,
-      required Function(AppPage) this.navigate})
+      Function(AppPage)? this.navigate})
       : super(key: key);
 
-  final Function(AppPage) navigate;
+  Function(AppPage)? navigate;
   final String title;
   AppInitParams? appInitParams;
 
@@ -800,7 +811,7 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
         } else if (snapshot.hasError) {
           return Text('Error: ${snapshot.error}');
         } else {
-          return MyHomePageContent(
+          return ActiveChatDialog(
               title: widget.title,
               appInitParams: snapshot.data as AppInitParams,
               navigate: widget.navigate);
@@ -810,20 +821,20 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
   }
 }
 
-class MyHomePageContent extends StatefulWidget {
-  MyHomePageContent(
+class ActiveChatDialog extends StatefulWidget {
+  ActiveChatDialog(
       {Key? key,
       required this.title,
       required this.appInitParams,
-      required this.navigate})
+      this.navigate})
       : super(key: key);
 
-  final Function(AppPage) navigate;
+  Function(AppPage)? navigate;
   final String title;
   final AppInitParams appInitParams;
 
   @override
-  State<MyHomePageContent> createState() => _MyHomePageContentState();
+  State<ActiveChatDialog> createState() => ActiveChatDialogState();
 }
 
 const WorkspaceRoot = "HHH";
@@ -867,7 +878,18 @@ const hermes_sysmsg =
     "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
 
 class Settings {
-  int _msg_poll_ms = 20;
+  Map<String, dynamic> data = {'_msg_poll_ms': isMobile() ? 100 : 20};
+
+  dynamic get(key, default_value) {
+    if (data.containsKey(key)) {
+      return data[key];
+    }
+    return default_value;
+  }
+
+  set(key, value) {
+    data[key] = value;
+  }
 }
 
 Map<String, dynamic> resolve_init_json() {
@@ -1755,20 +1777,70 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
 
 LLMEngine llm = LLMEngine();
 
-class ChatState {
-  final Chat chat_data;
-  final List<Message> msgs = [];
-  Map<String, dynamic>? meta;
+// class ChatState {
+//   final Chat chat_data;
+//   final List<Message> msgs = [];
+//   Map<String, dynamic>? meta;
+//
+//   bool _msg_streaming = false;
+//   Timer? _msg_poll_timer;
+//   bool _initialized = false;
+//   Timer? _token_counter_sync;
+//   int _input_tokens = 0;
+//
+//   ChatState(this.chat_data, {Map<String, dynamic>? meta});
+//
+//   advance_chat(String user_new_msg, LLMEngine llm, {streaming = true}) {
+//     // void addMsg(ChatMessage m, {use_polling = true}) {
+//     if (streaming) {
+//       var success = llm.start_advance_stream(user_msg: user_new_msg);
+//       _msg_streaming = true;
+//
+//       setState(() {
+//         _typingUsers = [user_ai];
+//         _messages.insert(0, m);
+//         var msg = ChatMessage(
+//             user: user_ai,
+//             text: "...", // TODO animation
+//             createdAt: llm.msgs.last.createdAt);
+//         _messages.insert(0, msg);
+//
+//         _msg_poll_timer = Timer.periodic(
+//             Duration(milliseconds: settings._msg_poll_ms), (timer) {
+//           updateStreamingMsgView();
+//         });
+//       });
+//     } else {
+//       setState(() {
+//         var success = llm.advance(user_msg: m.text);
+//         if (success) {
+//           _messages.insert(0, m);
+//           _messages.insert(
+//               0,
+//               ChatMessage(
+//                   user: user_ai,
+//                   text: llm.msgs.last.content,
+//                   createdAt: llm.msgs.last.createdAt));
+//           dlog("MSGS: ${_messages.map((m) => m.text)}");
+//         } else {
+//           _messages.insert(0, m);
+//           _messages.insert(
+//               0,
+//               ChatMessage(
+//                   user: user_SYSTEM,
+//                   text: "ERROR: ${llm.error}",
+//                   createdAt: DateTime.now()));
+//         }
+//       });
+//     }
+//   }
+//
+//   abort() {}
+// }
 
-  ChatState(this.chat_data, {Map<String, dynamic>? meta});
-
-  advance(String user_msg, LLMEngine llm) {}
-
-  abort() {}
-}
-
-class _MyHomePageContentState extends State<MyHomePageContent> {
-  late ChatManager chatManager;
+class ActiveChatDialogState extends State<ActiveChatDialog> {
+  ChatManager chatManager = ChatManager();
+  MetadataManager metaKV = MetadataManager();
 
   late List<ChatMessage> _messages = [];
   List<ChatUser> _typingUsers = [];
@@ -1781,8 +1853,22 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
   bool _initialized = false;
   Timer? _token_counter_sync;
   int _input_tokens = 0;
+  Chat? _current_chat;
+  DateTime? _last_chat_persist;
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    print("ActiveChatDialogState: attempting to persist state...");
+    persistState();
+    super.dispose();
+  }
 
   void lock_actions() {
     setState(() {
@@ -1798,51 +1884,206 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     });
   }
 
-  _MyHomePageContentState() {
-    // llama_init_json = resolve_init_json();
-    // dlog("LLAMA_INIT_JSON: ${llama_init_json}");
-    // dialog = LLMEngine(
-    //     system_message: hermes_sysmsg,
-    //     libpath: "librpcserver.dylib",
-    //     modelpath: resolve_llm_file(),
-    //     llama_init_json: llama_init_json,
-    //     onInitDone: () {
-    //       unlock_actions();
-    //     });
-    // _reset_msgs();
+  /* TODO: add app level invariant check for message role order (for a hypothetical
+      case where there the normal system->user->ai->user ... order breaks) */
+  List<ChatMessage> msgs_fromJson(
+      {String? jsonString, Map<String, dynamic>? jsonObject}) {
+    Map<String, dynamic> jsonMap = {};
+    if (jsonString != null) {
+      // Parse the JSON string into a Map object
+      Map<String, dynamic> jsonMap = jsonDecode(jsonString);
+    } else if (jsonObject != null) {
+      jsonMap = jsonObject;
+    }
+    if (jsonMap != null && jsonMap['messages'] is List) {
+      // Extract the 'messages' key from the Map object
+
+      List<dynamic> messagesJson = List<dynamic>.from(jsonMap['messages']);
+
+      // Map each message in 'messagesJson' to a ChatMessage object
+      List<ChatMessage> messages = [];
+      for (var messageJson in messagesJson) {
+        // Check if the message has the required fields
+        if (messageJson.containsKey('user') &&
+            messageJson.containsKey('text') &&
+            messageJson.containsKey('createdAt')) {
+          messages.add(ChatMessage(
+            user: getChatUserByName(messageJson['user']) ?? user,
+            text: messageJson['text'],
+            createdAt: DateTime.parse(messageJson['createdAt']),
+          ));
+        }
+      }
+
+      // Reverse the list to maintain the original order of messages
+      messages = messages.reversed.toList();
+
+      return messages;
+    }
+    return [];
   }
 
-  void reset_msgs() {
+  Map<String, dynamic> msgs_toJsonMap() {
+    List<Map<String, String>> export_msgs =
+        List.from(_messages.reversed.map((e) => <String, String>{
+              'user': e.user.getFullName(),
+              'text': e.text.toString(),
+              'createdAt': e.createdAt.toString()
+            }));
+    var ret = {
+      'meta': {'model': llm.modelpath},
+      'messages': export_msgs
+    };
+    return ret;
+  }
+
+  String msgs_toJson({indent = true}) {
+    var ret = msgs_toJsonMap();
+    if (indent) {
+      const JsonEncoder encoder = JsonEncoder.withIndent('  ');
+      return encoder.convert(ret);
+    } else {
+      return jsonEncode(ret);
+    }
+  }
+
+  Map<String, dynamic> toJson() {
+    var ret = {
+      '_msg_streaming': _msg_streaming,
+      '_initialized': _initialized,
+      '_input_tokens': _input_tokens,
+      '_last_chat_persist': _last_chat_persist?.millisecondsSinceEpoch ?? null,
+      'chat': _current_chat?.toJson(),
+      'messages': msgs_toJsonMap()
+    };
+    print("SERIALIZED_CHAT: $ret");
+    return ret;
+  }
+
+  bool fromJson(Map<String, dynamic> json) {
+    if (json['chat'] != null && json['messages'] != null) {
+      var restored_messages = msgs_fromJson(jsonObject: json['messages']);
+      if (restored_messages.isEmpty) {
+        print("No messages retrieved");
+        return false;
+      }
+
+      _msg_streaming = json['_msg_streaming'] ?? false;
+      _initialized = json['_initialized'] ?? false;
+      _input_tokens = json['_input_tokens'] ?? 0;
+      _last_chat_persist = (json['_last_chat_persist'] != null)
+          ? DateTime.fromMillisecondsSinceEpoch(json['_last_chat_persist'])
+          : null;
+      _current_chat = Chat.fromJson(json['chat']);
+
+      print("CURRENT CHAT: ${_current_chat?.toJson()}");
+
+      _messages = restored_messages;
+      sync_messages_to_llm();
+      return true;
+    }
+    return false;
+  }
+
+  void sync_messages_to_llm() {
+    llm.msgs = _messages
+        .map((m) => AIChatMessage(m.user.getFullName(), m.text))
+        .toList();
+  }
+
+  Future<bool> persistState() async {
+    try {
+      var json = toJson();
+      await metaKV.setMetadata("_persist_active_chat_state", json);
+      _last_chat_persist = DateTime.now();
+    } catch (e) {
+      print("Exception in ActiveChatDialogState.persistState: $e");
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> restoreState() async {
+    // try {
+    var data = await metaKV.getMetadata("_persist_active_chat_state");
+    if (data == null) return false;
+    var restored = false;
+
+    try {
+      restored = fromJson(data);
+    } catch (e) {
+      print("Exception while restoring chat from db: $e");
+      print("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
+      await metaKV.deleteMetadata("_persist_active_chat_state");
+    }
+
+    if (!restored) {
+      // TODO: cleaner rollback logic
+      _msg_streaming = false;
+      return false;
+    } else {
+      // The restored state might not have finished if the persist happened mid of
+      // AI writing an answer, we must handle this case and might need to restart polling timer
+      if (_msg_streaming) {
+        /* TODO ... */
+      }
+    }
+
+    return true;
+    // } catch (e) {
+    //   print("Exception in ActiveChatDialogState.restoreState: $e");
+    //   return false;
+    // }
+    // return true;
+  }
+
+  Future<void> create_new_chat() async {
+    var firstMsg = ChatMessage(
+      text:
+          "Beginning of conversation with model at ${llm.modelpath}\nSystem prompt: ${settings.get('system_message', hermes_sysmsg)}",
+      user: user_SYSTEM,
+      createdAt: DateTime.now(),
+    );
+
+    _current_chat = await chatManager.createChat(
+        firstMessageText: firstMsg.text, firstMessageUsername: "SYSTEM");
+
     setState(() {
-      _reset_msgs();
+      _msg_streaming = false;
+      _input_tokens = 0;
+      _last_chat_persist = null;
+      _messages = [firstMsg];
     });
   }
 
-  void _reset_msgs() {
-    _messages = [
-      ChatMessage(
-        text:
-            "Beginning of conversation with model at ${llm.modelpath}\nSystem prompt: $hermes_sysmsg",
-        user: user_SYSTEM,
-        createdAt: DateTime.now(),
-      ),
-    ];
+  Future<Chat> getCurrentChat() async {
+    if (_current_chat != null) {
+      return _current_chat!;
+    } else {
+      print("ERROR IN ADD MSG: NO ACTIVE CHAT, THIS SHOULD NOT HAPPEN");
+      await create_new_chat();
+      return _current_chat!;
+    }
   }
 
-  void updateStreamingMsgView() {
-    setState(() {
-      var poll_result = llm.poll_advance_stream();
-      var finished = poll_result.finished;
+  Future<void> updateStreamingMsgView() async {
+    Chat current = await getCurrentChat();
 
+    var poll_result = llm.poll_advance_stream();
+    var finished = poll_result.finished;
+
+    if (finished) {
+      var completedMsg = llm.msgs.last;
+      chatManager.addMessageToChat(current.uuid, completedMsg.content, "AI");
+      await metaKV.deleteMetadata("_msg_stream_in_progress_");
+    } else {
+      await metaKV.setMetadata("_msg_stream_in_progress_", llm.stream_msg_acc);
+    }
+
+    setState(() {
       if (finished) {
         _msg_poll_timer?.cancel();
         _msg_streaming = false;
-
-        String upd_str = poll_result.joined();
-
-        // if (upd_str.isNotEmpty) {
-        //   stdout.write("$upd_str");
-        // }
 
         var completedMsg = llm.msgs.last;
 
@@ -1856,48 +2097,36 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     });
   }
 
-  void addMsg(ChatMessage m, {use_polling = true}) {
-    if (use_polling) {
-      var success = llm.start_advance_stream(user_msg: m.text);
-      _msg_streaming = true;
+  _enable_stream_poll_timer() {
+    _msg_poll_timer = Timer.periodic(
+        Duration(milliseconds: settings.get("_msg_poll_ms", 100) as int),
+        (timer) {
+      updateStreamingMsgView();
+    });
+  }
 
-      setState(() {
-        _typingUsers = [user_ai];
-        _messages.insert(0, m);
-        var msg = ChatMessage(
-            user: user_ai,
-            text: "...", // TODO animation
-            createdAt: llm.msgs.last.createdAt);
-        _messages.insert(0, msg);
+  Future<void> addMsg(ChatMessage m) async {
+    Chat current = await getCurrentChat();
 
-        _msg_poll_timer = Timer.periodic(
-            Duration(milliseconds: settings._msg_poll_ms), (timer) {
-          updateStreamingMsgView();
-        });
-      });
-    } else {
-      setState(() {
-        var success = llm.advance(user_msg: m.text);
-        if (success) {
-          _messages.insert(0, m);
-          _messages.insert(
-              0,
-              ChatMessage(
-                  user: user_ai,
-                  text: llm.msgs.last.content,
-                  createdAt: llm.msgs.last.createdAt));
-          dlog("MSGS: ${_messages.map((m) => m.text)}");
-        } else {
-          _messages.insert(0, m);
-          _messages.insert(
-              0,
-              ChatMessage(
-                  user: user_SYSTEM,
-                  text: "ERROR: ${llm.error}",
-                  createdAt: DateTime.now()));
-        }
-      });
-    }
+    await chatManager.addMessageToChat(current.uuid, m.text, "user");
+    await metaKV.setMetadata("_msg_stream_in_progress_", {
+      'chat_uuid': current.uuid,
+      'partial_msg': '',
+    });
+
+    var success = llm.start_advance_stream(user_msg: m.text);
+    _msg_streaming = true;
+
+    setState(() {
+      _typingUsers = [user_ai];
+      _messages.insert(0, m);
+      var msg = ChatMessage(
+          user: user_ai,
+          text: "...", // TODO animation
+          createdAt: llm.msgs.last.createdAt);
+      _messages.insert(0, msg);
+      _enable_stream_poll_timer();
+    });
   }
 
   void reload_model_from_file(String new_modelpath) async {
@@ -1914,25 +2143,11 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     llm.reinit(
         modelpath: new_modelpath,
         llama_init_json: resolve_init_json(),
-        onInitDone: () {
-          reset_msgs();
+        onInitDone: () async {
+          await create_new_chat();
           unlock_actions();
         });
-    reset_msgs();
-  }
-
-  String serialize_msgs() {
-    List<Map<String, String>> export_msgs =
-        List.from(_messages.reversed.map((e) => <String, String>{
-              'user': e.user.getFullName(),
-              'text': e.text.toString(),
-              'createdAt': e.createdAt.toString()
-            }));
-    const JsonEncoder encoder = JsonEncoder.withIndent('  ');
-    return encoder.convert({
-      'meta': {'model': llm.modelpath},
-      'messages': export_msgs
-    });
+    create_new_chat();
   }
 
   void _update_token_counter(String upd) {
@@ -1959,13 +2174,27 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     return ret;
   }
 
+  void attemptToRestartChat() {
+    print("ActiveChatDialogState: attempting to restore state...");
+    restoreState().then((success) {
+      if (!success) {
+        print("[ERROR] RESTORE FAILED, CREATING NEW CHAT");
+        create_new_chat();
+      } else {
+        print("[OK] RESTORE CHAT SUCCEEDED");
+        print("Messages: ${msgs_toJson()}");
+        setState(() {});
+      }
+    });
+  }
+
   void initAIifNotAlready() {
-    if (llm.init_in_progress) {}
-    if (llm.initialized && !_initialized) {
-      // reentry
-      unlock_actions();
-    }
-    if (!llm.initialized && llm.init_postponed && getAppInitParams() != null) {
+    if (llm.init_in_progress) {
+      print("initAIifNotAlready: llm.init_in_progress");
+    } else if (!llm.initialized &&
+        llm.init_postponed &&
+        getAppInitParams() != null) {
+      print("initAIifNotAlready: llm.init_postponed");
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) requestStoragePermission();
@@ -1974,9 +2203,15 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
           system_message: hermes_sysmsg,
           llama_init_json: resolve_init_json(),
           onInitDone: () {
-            reset_msgs();
+            print("ActiveChatDialogState: attempting to restore state...");
+            attemptToRestartChat();
             unlock_actions();
           });
+    } else if (llm.initialized && !_initialized) {
+      print("initAIifNotAlready: llm.initialized && !_initialized");
+      // reentry
+      attemptToRestartChat();
+      unlock_actions();
     }
   }
 
@@ -2087,7 +2322,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
     }
 
     return Scaffold(
-      drawer: _buildDrawer(context, navigate: widget.navigate),
+      drawer: _buildDrawer(context),
       appBar: AppBar(
           // TRY THIS: Try changing the color here to a specific color (to
           // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
@@ -2142,8 +2377,8 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
               ),
               onPressed: actionsEnabled
                   ? () async {
-                      llm.reset_msgs();
-                      reset_msgs();
+                      llm.clear_state();
+                      create_new_chat();
                     }
                   : null,
             ),
@@ -2155,7 +2390,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
               ),
               onPressed: actionsEnabled
                   ? () {
-                      FlutterClipboard.copy(serialize_msgs());
+                      FlutterClipboard.copy(msgs_toJson());
 
                       const snackBar = SnackBar(
                         content: Text('Conversation copied to clipboard'),
@@ -2164,7 +2399,7 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
                       // Find the ScaffoldMessenger in the widget tree
                       // and use it to show a SnackBar.
                       ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                      Timer(Duration(milliseconds: 500), () {
+                      Timer(const Duration(milliseconds: 500), () {
                         ScaffoldMessenger.of(context).hideCurrentSnackBar();
                       });
                     }
@@ -2192,8 +2427,8 @@ class _MyHomePageContentState extends State<MyHomePageContent> {
 final SEARCH_THROTTLE = isMobile() ? 500 : 300;
 
 class SearchPage extends StatefulWidget {
-  final Function(AppPage) navigate;
-  SearchPage({required this.navigate});
+  Function(AppPage)? navigate;
+  SearchPage({this.navigate});
 
   @override
   _SearchPageState createState() => _SearchPageState();
@@ -2277,7 +2512,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: _buildDrawer(context, navigate: widget.navigate),
+      drawer: _buildDrawer(context),
       appBar: AppBar(
         title: TextField(
           controller: _searchController,
@@ -2591,7 +2826,10 @@ String capitalizeAllWord(String value) {
   return result;
 }
 
-Drawer _buildDrawer(BuildContext context, {navigate}) {
+Drawer _buildDrawer(BuildContext context) {
+  final navigationProvider = NavigationProvider.of(context);
+  final navigate = navigationProvider?.navigate;
+
   return Drawer(
       child: Container(
     child: ListView(
@@ -2608,12 +2846,33 @@ Drawer _buildDrawer(BuildContext context, {navigate}) {
           tileColor: selected ? Colors.lightBlueAccent : Colors.white,
           title: Text(getPageName(page, capitalize: true)),
           onTap: () {
-            navigate(page);
+            if (navigate != null) navigate(page);
           },
         );
       }).toList(),
     ),
   ));
+}
+
+class NavigationProvider extends InheritedWidget {
+  final VoidCallback? onBeforeNavigate;
+  Function(AppPage)? navigate;
+
+  NavigationProvider({
+    required Widget child,
+    this.navigate,
+    this.onBeforeNavigate,
+  }) : super(child: child);
+
+  static NavigationProvider? of(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<NavigationProvider>();
+  }
+
+  @override
+  bool updateShouldNotify(NavigationProvider oldWidget) {
+    return navigate != oldWidget.navigate ||
+        onBeforeNavigate != oldWidget.onBeforeNavigate;
+  }
 }
 
 class PseudoRouter extends StatefulWidget {
@@ -2627,7 +2886,10 @@ class PseudoRouter extends StatefulWidget {
 class _PseudoRouter extends State<PseudoRouter> {
   AppPage _currentPage = AppPage.conversation;
 
-  void navigate(AppPage page) {
+  void navigate(AppPage page, {VoidCallback? onBeforeNavigate}) {
+    if (onBeforeNavigate != null) {
+      onBeforeNavigate();
+    }
     setState(() {
       global_current_page = page;
       _currentPage = page;
@@ -2636,25 +2898,28 @@ class _PseudoRouter extends State<PseudoRouter> {
 
   @override
   Widget build(BuildContext context) {
-    switch (_currentPage) {
+    return NavigationProvider(
+      navigate: navigate,
+      child: _buildPage(_currentPage),
+    );
+  }
+
+  Widget _buildPage(AppPage page) {
+    switch (page) {
       case AppPage.conversation:
         return ActiveChatPage(
-            title: APP_TITLE,
-            appInitParams: widget.appInitParams,
-            navigate: navigate);
+            title: APP_TITLE, appInitParams: widget.appInitParams);
       case AppPage.settings:
-        return SearchPage(navigate: navigate);
+        return SearchPage();
       case AppPage.search:
-        return SearchPage(navigate: navigate);
+        return SearchPage();
       case AppPage.history:
-        return SearchPage(navigate: navigate);
+        return SearchPage();
       case AppPage.help:
-        return SearchPage(navigate: navigate);
+        return SearchPage();
       default:
         return ActiveChatPage(
-            title: APP_TITLE,
-            appInitParams: widget.appInitParams,
-            navigate: navigate);
+            title: APP_TITLE, appInitParams: widget.appInitParams);
     }
   }
 }

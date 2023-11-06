@@ -37,7 +37,7 @@ void main() async {
       print(
           "Test creating chats and messages: ${_chat.toJson()}, ${_message.toJson()}");
 
-      chat = await chatManager.createChat('Test Chat');
+      chat = await chatManager.createChat(title: 'Test Chat');
 
       message = await chatManager.addMessageToChat(
           chat.uuid, 'Test message', 'user') as Message;
@@ -196,10 +196,9 @@ void main() async {
       await metadataManager.setMetadata('key1', 'value1', subspace: subspace);
       await metadataManager.setMetadata('key2', 'value2', subspace: subspace);
 
-      final results =
-          await metadataManager.getMetadataCollection(subspace, 'key1');
-      expect(results.map((r) => r['value']), contains('value1'));
-      expect(results.map((r) => r['value']), contains('value2'));
+      final results = await metadataManager.getMetadataCollection(subspace);
+      expect(results.containsValue('value1'), true);
+      expect(results.containsValue('value2'), true);
     });
 
     test('getMetadata retrieves metadata by key', () async {

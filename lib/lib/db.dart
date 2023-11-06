@@ -27,6 +27,8 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import "dart:typed_data";
 
+import 'util.dart';
+
 Future<List<Map<String, dynamic>>> fetchAllRows(
     String tableName, Database db) async {
   final List<Map<String, dynamic>> allRows = await db.query(tableName);
@@ -284,9 +286,9 @@ class Message {
       username: json['username'],
       messageIndex: json['message_index'],
       message: json['message'],
-      uuid: Uuid.fromBytes(json['uuid']),
-      clientUuid: Uuid.fromBytes(json['client_uuid']),
-      chatUuid: Uuid.fromBytes(json['chat_uuid']),
+      uuid: Uuid.fromBytes(List<int>.from(json['uuid'])),
+      clientUuid: Uuid.fromBytes(List<int>.from(json['client_uuid'])),
+      chatUuid: Uuid.fromBytes(List<int>.from(json['chat_uuid'])),
       meta: jsonDecode(json['meta']),
     );
   }
@@ -347,8 +349,8 @@ class Chat {
     return Chat(
       date: json['date'],
       title: json['title'],
-      uuid: Uuid.fromBytes(json['uuid']),
-      clientUuid: Uuid.fromBytes(json['client_uuid']),
+      uuid: Uuid.fromBytes(List<int>.from(json['uuid'])),
+      clientUuid: Uuid.fromBytes(List<int>.from(json['client_uuid'])),
       meta: jsonDecode(json['meta']),
       lastMsgIndex: json['last_msg_index'],
     );
@@ -384,6 +386,19 @@ Future<String> resolve_db_dir() async {
   return databaseDir;
 }
 
+String resolve_db_file() {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) {
+    print("[DB] USING TEST DB FILE");
+    return "testdb_sqlite.db";
+  } else if (Platform.environment.containsKey('DEVELOPMENT') ||
+      isDevelopment()) {
+    print("[DB] USING DEVELOPMENT DB FILE");
+    return "devdb_sqlite.db";
+  }
+  print("[DB] USING RELEASE DB FILE");
+  return "hhh_sqlite.db";
+}
+
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
 
@@ -393,9 +408,7 @@ class DatabaseHelper {
 
   static Database? _database;
 
-  final dbName = Platform.environment.containsKey('FLUTTER_TEST')
-      ? "testdb.sqlite"
-      : "hhh_sqlite.db";
+  final dbName = resolve_db_file();
 
   DatabaseHelper._internal();
 
@@ -574,13 +587,25 @@ class ChatManager {
     return await _databaseHelper.getTables();
   }
 
-  Future<Chat> createChat(String? title) async {
+  Future<Chat> createChat(
+      {String? title,
+      String? firstMessageText,
+      String? firstMessageUsername,
+      Map<String, dynamic>? firstMessageMeta}) async {
     final db = await _databaseHelper.database;
-// final chatCount = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM chats')) ?? 0;
     var chat =
         Chat(title: title, clientUuid: clientUuid, uuid: Uuid.generate());
-    print("createChat ${chat.toJson()}");
+
+    print("CREATE CHAT ${chat.toJson()}");
+
     await db.insert('chats', chat.toJson());
+
+    if (firstMessageText != null && firstMessageUsername != null) {
+      await addMessageToChatByChat(
+          db, chat, firstMessageText, firstMessageUsername,
+          meta: firstMessageMeta);
+    }
+
     return chat;
   }
 
@@ -601,20 +626,27 @@ class ChatManager {
     }
   }
 
+  Future<Message?> addMessageToChatByChat(
+      Database db, Chat parent, String messageText, String username,
+      {Map<String, dynamic>? meta}) async {
+    var msg = Message.fromChat(parent, messageText, username, meta);
+    print("addMessageToChat: ${msg.toJson()}");
+    await db.insert('messages', msg.toJson());
+    await updateChat(parent.uuid, {'last_msg_index': parent.lastMsgIndex + 1});
+    parent.lastMsgIndex++;
+    return msg;
+  }
+
   Future<Message?> addMessageToChat(
       Uuid chatId, String messageText, String username,
       {Map<String, dynamic>? meta}) async {
     final db = await _databaseHelper.database;
-    print(chatId);
+    print("NEW MSG IN CHAT=$chatId USER=$username TEXT=$messageText");
 
     var parent = await getChat(chatId);
     if (parent != null) {
-      var msg = Message.fromChat(parent, messageText, username, meta);
-      print("addMessageToChat: ${msg.toJson()}");
-      await db.insert('messages', msg.toJson());
-      await updateChat(chatId, {'last_msg_index': parent.lastMsgIndex + 1});
-      parent.lastMsgIndex++;
-      return msg;
+      return await addMessageToChatByChat(db, parent, messageText, username,
+          meta: meta);
     }
   }
 
@@ -784,25 +816,56 @@ class MetadataManager {
       'INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)',
       [
         (subspace == null) ? key : "__${subspace}__${key}",
-        value,
+        jsonEncode(value),
       ],
     );
   }
 
-  Future<dynamic> getMetadataCollection(String subspace, String key) async {
+  Future<void> deleteMetadata(String key, {String? subspace}) async {
+    final db = await _databaseHelper.database;
+    String _key = (subspace == null) ? key : "__${subspace}__${key}";
+    var queryResult = await db.rawQuery(
+      'SELECT * FROM metadata WHERE key = ?',
+      [_key],
+    );
+
+    if (queryResult.isNotEmpty) {
+      await db.delete(
+        'metadata',
+        where: 'key = ?',
+        whereArgs: [_key],
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> getMetadataCollection(String subspace) async {
     final db = await _databaseHelper.database;
 
     final List<Map<String, dynamic>> results = await db.query(
       'metadata',
-      columns: ['value'],
+      columns: ['key', 'value'],
       where: 'key LIKE ?',
       whereArgs: ["__${subspace}__%"],
     );
 
-    return results;
+    Map<String, dynamic> ret = {};
+
+    for (var row in results) {
+      if (row != null && row.containsKey('key') && row['key'] != null) {
+        try {
+          ret[row['key']] = jsonDecode(row['value']);
+        } catch (e) {
+          ret[row['key']] = row['value'];
+        }
+      }
+    }
+
+    print("$results $ret");
+
+    return ret;
   }
 
-  Future<dynamic> getMetadata(String key) async {
+  Future<dynamic> getMetadata(String key, {dynamic? defaultValue}) async {
     final db = await _databaseHelper.database;
 
     final List<Map<String, dynamic>> results = await db.query(
@@ -813,9 +876,13 @@ class MetadataManager {
     );
 
     if (results.isNotEmpty) {
-      return results.first['value'];
+      try {
+        return jsonDecode(results.first['value']);
+      } catch (e) {
+        results.first['value'];
+      }
     }
 
-    return null;
+    return (defaultValue != null) ? defaultValue : null;
   }
 }

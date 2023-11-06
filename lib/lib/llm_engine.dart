@@ -18,28 +18,22 @@ class LLAMAChatCompletion {
   int max_tokens;
   double temperature;
   List<String> stop;
-  int? async_slack_ms;
 
-  LLAMAChatCompletion(this.prompt,
-      {this.max_tokens = 1280,
-      this.temperature = 0.0,
-      this.stop = _IM_END_,
-      this.async_slack_ms});
+  LLAMAChatCompletion(
+    this.prompt, {
+    this.max_tokens = 1280,
+    this.temperature = 0.0,
+    this.stop = _IM_END_,
+  });
 
-  Map<String, dynamic> toJson() {
-    var ret = {
-      'prompt': prompt,
-      'n_predict': max_tokens,
-      'temperature': temperature,
-      'stop': stop,
-      'stream': false,
-      '__debug': __DEBUG
-    };
-    if (async_slack_ms != null) {
-      ret['async_slack_ms'] = async_slack_ms!;
-    }
-    return ret;
-  }
+  Map<String, dynamic> toJson() => {
+        'prompt': prompt,
+        'n_predict': max_tokens,
+        'temperature': temperature,
+        'stop': stop,
+        'stream': false,
+        '__debug': __DEBUG
+      };
 }
 
 class AIChatMessage {
@@ -445,8 +439,8 @@ class LLMEngine {
     return true;
   }
 
-  void reset_msgs() {
-    print("AiDialog: reset_msgs");
+  void clear_state() {
+    print("AiDialog: clear_state");
     msgs = [];
     if (system_message.isNotEmpty) {
       msgs.add(AIChatMessage("system", system_message));
@@ -527,8 +521,7 @@ class LLMEngine {
     return false;
   }
 
-  bool start_advance_stream(
-      {String? user_msg, bool fix_chatml = true, int? async_slack_ms}) {
+  bool start_advance_stream({String? user_msg, bool fix_chatml = true}) {
     streaming = true;
 
     if (user_msg != null) {
@@ -541,8 +534,7 @@ class LLMEngine {
     }
 
     try {
-      String api_query = jsonEncode(LLAMAChatCompletion(format_chatml(msgs),
-          async_slack_ms: async_slack_ms));
+      String api_query = jsonEncode(LLAMAChatCompletion(format_chatml(msgs)));
 
       if (__DEBUG) print("DEBUG: api_query=${api_query}");
 
