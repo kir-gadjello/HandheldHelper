@@ -438,7 +438,7 @@ class LLMEngine {
       initialized = false;
       init_in_progress = true;
       if (onComplete != null) {
-        cancel_advance_stream(onComplete: () {
+        cancel_advance_stream(onComplete: (String _) {
           initialized = true;
           init_in_progress = false;
           streaming = false;
@@ -603,9 +603,7 @@ class LLMEngine {
         }
 
         msgs.add(AIChatMessage("assistant", stream_msg_acc));
-        stream_msg_acc = "";
-        streaming = false;
-        error = "";
+        _reset_streaming_state();
       }
 
       return stream_update;
@@ -619,8 +617,17 @@ class LLMEngine {
     return AIChatPollResult();
   }
 
-  Future<bool> cancel_advance_stream({VoidCallback? onComplete}) async {
+  _reset_streaming_state() {
+    stream_msg_acc = "";
+    streaming = false;
+    error = "";
+  }
+
+  Future<bool> cancel_advance_stream(
+      {void Function(String cmpl)? onComplete}) async {
     String api_query = "{}";
+
+    String last_stream_acc_state = stream_msg_acc;
 
     final api_resp = rpc
         .async_completion_cancel(api_query.toNativeUtf8().cast<ffi.Char>())
@@ -629,16 +636,22 @@ class LLMEngine {
 
     if (onComplete == null) {
       var resp = jsonDecode(api_resp);
+      _reset_streaming_state();
       return (resp != null && (resp?['success'] == true)) ? true : false;
     } else {
       AIChatPollResult poll_res;
       int counter = 20;
+      int i = 0;
       do {
+        print("LLM: POLLING FOR CANCEL ${i++}");
         await Future.delayed(const Duration(milliseconds: 100));
         counter--;
         poll_res = poll_advance_stream();
       } while (counter > 0 && !poll_res.finished);
-      onComplete();
+
+      _reset_streaming_state();
+      onComplete(last_stream_acc_state);
+
       return true;
     }
   }

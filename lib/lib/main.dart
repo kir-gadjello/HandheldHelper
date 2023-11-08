@@ -27,6 +27,8 @@ final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 
+final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1000 : 500;
+
 Future<void> requestStoragePermission() async {
   var status = await Permission.manageExternalStorage.request();
   if (status.isGranted) {
@@ -1868,6 +1870,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   Chat? _current_chat;
   DateTime? _last_chat_persist;
   String _current_msg_input = "";
+  String? _incomplete_msg;
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
@@ -1984,7 +1987,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       '_msg_streaming': _msg_streaming,
       '_initialized': _initialized,
       '_input_tokens': _input_tokens,
-      '_last_chat_persist': _last_chat_persist?.millisecondsSinceEpoch ?? null,
+      '_persist_datetime': DateTime.now().toString(),
       'chat_uuid': _current_chat?.uuid.toJson(),
     };
 
@@ -2000,9 +2003,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       _msg_streaming = json['_msg_streaming'] ?? false;
       _initialized = json['_initialized'] ?? false;
       _input_tokens = json['_input_tokens'] ?? 0;
-      _last_chat_persist = (json['_last_chat_persist'] != null)
-          ? DateTime.fromMillisecondsSinceEpoch(json['_last_chat_persist'])
-          : null;
+      _last_chat_persist = DateTime.parse(json['_persist_datetime'] ?? "");
 
       var chat_uuid = Uuid.fromJson(json['chat_uuid']);
       print("CURRENT CHAT UUID: $chat_uuid");
@@ -2038,69 +2039,97 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   Future<bool> persistState() async {
+    final t0 = DateTime.now();
     try {
-      _last_chat_persist = DateTime.now();
       var json = toJson();
       await metaKV.setMetadata("_persist_active_chat_state", json);
     } catch (e) {
       print("Exception in ActiveChatDialogState.persistState: $e");
+      var t1 = DateTime.now();
+      print("DB PERSIST [FAILURE] TOOK ${t1.difference(t0).inMilliseconds}ms");
       return false;
     }
+    _last_chat_persist = DateTime.now();
+    var t1 = DateTime.now();
+    print("DB PERSIST [SUCCESS] TOOK ${t1.difference(t0).inMilliseconds}ms");
     return true;
   }
 
-  Future<bool> restoreState() async {
-    // try {
-    var data = await metaKV.getMetadata("_persist_active_chat_state");
-    if (data == null) return false;
-    var restored = false;
+  Future<void> clearPersistedState({onlyStreaming = false}) async {
+    if (onlyStreaming) {
+      print("clearPersistedState onlyStreaming = true");
 
-    try {
-      restored = await fromJson(data);
-    } catch (e) {
-      print("Exception while restoring chat from db: $e");
-      print("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
+      var data = await metaKV.getMetadata("_persist_active_chat_state");
+      if (data == null) {
+        return;
+      }
+
+      if (data is Map<String, dynamic>) {
+        var jmap = data as Map<String, dynamic>;
+        jmap["_msg_streaming"] = false;
+        jmap.remove("_ai_msg_stream_acc");
+        await metaKV.setMetadata("_persist_active_chat_state", jmap);
+        print("clearPersistedState SUCCESS");
+      }
+    } else {
       await metaKV.deleteMetadata("_persist_active_chat_state");
     }
+  }
 
-    if (!restored) {
-      // TODO: cleaner rollback logic
-      _msg_streaming = false;
-      return false;
-    } else {
-      // The restored state might not have finished if the persist happened mid of
-      // AI writing an answer, we must handle this case and might need to restart polling timer
-      if (_msg_streaming) {
-        var partial_answer = data['_ai_msg_stream_acc'];
-        if (partial_answer is String && partial_answer.isNotEmpty) {
-          print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
+  Future<bool> restoreState() async {
+    try {
+      var data = await metaKV.getMetadata("_persist_active_chat_state");
+      if (data == null) {
+        print("PERSISTED CHAT STATE SLOT EMPTY");
+        return false;
+      }
+      var restored = false;
 
-          /* for now we just add this as a message with metadata _interrupted = true
+      try {
+        restored = await fromJson(data);
+      } catch (e) {
+        print("Exception while restoring chat from db: $e");
+        print("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
+        await metaKV.deleteMetadata("_persist_active_chat_state");
+      }
+
+      if (!restored) {
+        // TODO: cleaner rollback logic
+        _msg_streaming = false;
+        return false;
+      } else {
+        // The restored state might not have finished if the persist happened mid of
+        // AI writing an answer, we must handle this case and might need to restart polling timer
+        if (_msg_streaming) {
+          var partial_answer = data['_ai_msg_stream_acc'];
+          if (partial_answer is String && partial_answer.isNotEmpty) {
+            print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
+
+            /* for now we just add this as a message with metadata _interrupted = true
           and restore the state to initial TODO ... */
-          _msg_streaming = false;
+            _msg_streaming = false;
 
-          if (llm.streaming) {
-            lock_actions();
-            llm.clear_state(onComplete: () async {
+            if (llm.streaming) {
+              lock_actions();
+              llm.clear_state(onComplete: () async {
+                await addMessageToActiveChat("ai", partial_answer,
+                    meta: {"_interrupted": true});
+                unlock_actions();
+              });
+            } else {
               await addMessageToActiveChat("ai", partial_answer,
                   meta: {"_interrupted": true});
-              unlock_actions();
-            });
-          } else {
-            await addMessageToActiveChat("ai", partial_answer,
-                meta: {"_interrupted": true});
-            setState(() {});
+              setState(() {});
+            }
           }
         }
       }
-    }
 
-    return true;
-    // } catch (e) {
-    //   print("Exception in ActiveChatDialogState.restoreState: $e");
-    //   return false;
-    // }
-    // return true;
+      return true;
+    } catch (e) {
+      print("Exception in ActiveChatDialogState.restoreState: $e");
+      return false;
+    }
   }
 
   Future<void> create_new_chat() async {
@@ -2115,6 +2144,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         firstMessageText: firstMsg.text, firstMessageUsername: "SYSTEM");
 
     _messages = [firstMsg];
+
+    await persistState();
+
     sync_messages_to_llm();
 
     setState(() {
@@ -2145,7 +2177,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     _messages.insert(0, cmsg);
   }
 
-  Future<void> updateStreamingMsgView({canceled = false}) async {
+  Future<void> updateStreamingMsgView(
+      {canceled = false, String? final_ai_output}) async {
     Chat current = await getCurrentChat();
 
     var finished = false;
@@ -2173,9 +2206,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     } else {
       finished = true;
       // llm.msgs.last;
-      if (llm.streaming && llm.stream_msg_acc.isNotEmpty) {
-        completedMsg = AIChatMessage("assistant", llm.stream_msg_acc);
-        chatManager.addMessageToChat(current.uuid, completedMsg.content, "AI",
+      if (final_ai_output != null) {
+        completedMsg = AIChatMessage("assistant", final_ai_output!);
+        chatManager.addMessageToChat(current.uuid, final_ai_output!, "AI",
             meta: {"_interrupted": true, "_canceled_by_user": true});
         await metaKV.deleteMetadata("_msg_stream_in_progress_");
       } else {
@@ -2202,9 +2235,19 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
         markChatMessageSpecial(_messages[0], _messages[0].customProperties);
 
+        print("${_messages[0].customProperties}");
+
         _typingUsers = [];
+        _incomplete_msg = null;
       } else {
+        _incomplete_msg = llm.stream_msg_acc;
         _messages[0].text = llm.stream_msg_acc;
+
+        if (_last_chat_persist == null ||
+            DateTime.now().difference(_last_chat_persist!).inMilliseconds >
+                MIN_STREAM_PERSIST_INTERVAL) {
+          persistState();
+        }
       }
     });
   }
@@ -2385,9 +2428,15 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     create_new_chat();
   }
 
-  stop_llm_generation() {
+  stop_llm_generation() async {
     if (_msg_streaming) {
-      updateStreamingMsgView(canceled: true);
+      await clearPersistedState(onlyStreaming: true);
+      _msg_poll_timer?.cancel();
+
+      await llm.cancel_advance_stream(onComplete: (String final_ai_output) {
+        updateStreamingMsgView(
+            canceled: true, final_ai_output: final_ai_output);
+      });
     }
   }
 
@@ -3121,31 +3170,34 @@ Drawer _buildDrawer(BuildContext context) {
   var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
 
   return Drawer(
+      shape: isMobile()
+          ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+          : const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       child: Container(
-    color: bgColor,
-    child: ListView(
-      children: _app_pages.map((page) {
-        final selected = page == global_current_page;
-        final textStyle = TextStyle(
-            color: selected
-                ? fgColor
-                : Theme.of(context).colorScheme.inversePrimary,
-            fontSize: 28);
-        return ListTile(
-          selected: selected,
-          titleTextStyle: textStyle,
-          // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
-          title: Text(getPageName(page, capitalize: true)),
-          onTap: () {
-            if (navigate != null) {
-              navigate(page);
-            }
-            Navigator.pop(context); // Close the drawer
-          },
-        );
-      }).toList(),
-    ),
-  ));
+        color: bgColor,
+        child: ListView(
+          children: _app_pages.map((page) {
+            final selected = page == global_current_page;
+            final textStyle = TextStyle(
+                color: selected
+                    ? fgColor
+                    : Theme.of(context).colorScheme.inversePrimary,
+                fontSize: 28);
+            return ListTile(
+              selected: selected,
+              titleTextStyle: textStyle,
+              // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
+              title: Text(getPageName(page, capitalize: true)),
+              onTap: () {
+                if (navigate != null) {
+                  navigate(page);
+                }
+                Navigator.pop(context); // Close the drawer
+              },
+            );
+          }).toList(),
+        ),
+      ));
 }
 
 class NavigationProvider extends InheritedWidget {
