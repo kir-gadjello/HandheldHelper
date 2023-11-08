@@ -23,6 +23,9 @@ import 'util.dart';
 
 final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
 
+const actionIconSize = 38.0;
+const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
+
 Future<void> requestStoragePermission() async {
   var status = await Permission.manageExternalStorage.request();
   if (status.isGranted) {
@@ -1848,6 +1851,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   int _input_tokens = 0;
   Chat? _current_chat;
   DateTime? _last_chat_persist;
+  String _current_msg_input = "";
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
@@ -2212,7 +2216,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   void _update_token_counter(String upd) {
     setState(() {
-      _input_tokens = llm.measure_tokens(upd);
+      _input_tokens = upd.isNotEmpty ? llm.measure_tokens(upd) : 0;
       dlog("LOG _update_token_counter $_input_tokens");
     });
   }
@@ -2293,6 +2297,55 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     );
   }
 
+  showModelSwitchMenu() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      File file = File(result.files.single.path ?? "");
+      if (file.existsSync()) {
+        var new_model = file.path;
+        dlog("RELOADING FROM $new_model");
+        reload_model_from_file(new_model);
+      }
+    } else {
+      // User canceled the picker
+    }
+  }
+
+  showSnackBarTop(String msg, {int delay = 750}) {
+    var snackBar = SnackBar(
+        duration: Duration(milliseconds: delay),
+        behavior: SnackBarBehavior.floating,
+        margin:
+            EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 96),
+        content: Text(msg),
+        dismissDirection: DismissDirection.none);
+
+    // Find the ScaffoldMessenger in the widget tree
+    // and use it to show a SnackBar.
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+  }
+
+  executeChatShare() {
+    FlutterClipboard.copy(msgs_toJson());
+    showSnackBarTop('Conversation copied to clipboard');
+  }
+
+  reset_current_chat() async {
+    llm.clear_state();
+    create_new_chat();
+  }
+
+  stop_generation() {
+    // TODO
+  }
+
+  show_settings_menu() {
+    // TODO
+  }
+
+  final _scaffoldKey = new GlobalKey<ScaffoldState>();
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -2306,27 +2359,73 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     const Color disabledColor = Colors.white60;
     Color iconColor = actionsEnabled ? Colors.white : disabledColor;
 
-    const Color warningColor = Colors.deepOrangeAccent;
+    Color warningColor = Theme.of(context).colorScheme.error!;
     bool tokenOverload = (llm.tokens_used + _input_tokens) >= llm.n_ctx;
 
     Widget mainWidget;
 
+    var activeColor = Theme.of(context).primaryColor;
     var bgColor = Theme.of(context).listTileTheme.tileColor;
     var textColor = Theme.of(context).listTileTheme.textColor;
+    var hintColor = Theme.of(context).hintColor;
+    Color headerTextColor = textColor!;
 
     if (app_setup_done()) {
       initAIifNotAlready();
       mainWidget = Expanded(
         child: DashChat(
           inputOptions: InputOptions(
+              sendButtonBuilder: (Function fct) => InkWell(
+                    onTap: () => fct(),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
+                      child: Column(children: [
+                        Icon(
+                          size: 32,
+                          Icons.send,
+                          color: _current_msg_input.isNotEmpty
+                              ? activeColor
+                              : hintColor,
+                        ),
+                        if (_input_tokens > 0)
+                          Text("$_input_tokens",
+                              style: TextStyle(color: hintColor))
+                      ]),
+                    ),
+                  ),
               // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
               sendOnEnter: false,
               sendOnShiftEnter: true,
               alwaysShowSend: true,
-              inputToolbarMargin: EdgeInsets.all(8.0),
+              inputToolbarMargin: EdgeInsets.all(0.0),
+              inputToolbarPadding: EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
+              inputMaxLines: 15,
+              inputDecoration: InputDecoration(
+                isDense: true,
+                hintText: "Write a message to AI...",
+                hintStyle: TextStyle(color: hintColor),
+                filled: true,
+                fillColor: Colors.grey[100],
+                contentPadding: const EdgeInsets.only(
+                  left: 18,
+                  top: 10,
+                  bottom: 10,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12.0),
+                  borderSide: const BorderSide(
+                    width: 0,
+                    style: BorderStyle.none,
+                  ),
+                ),
+              ),
+              inputToolbarStyle:
+                  BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
               inputDisabled: !(_initialized ?? false),
               onTextChange: (String upd) {
                 dlog("LOG onTextChange $upd");
+                _current_msg_input = upd;
                 if (_token_counter_sync != null) {
                   _token_counter_sync?.cancel();
                 }
@@ -2347,11 +2446,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               onLongPressMessage: (m) {
                 String msg = "${m.user.getFullName()}: ${m.text}";
                 FlutterClipboard.copy(msg);
-                final snackBar = SnackBar(
-                  content: Text(
-                      "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard"),
-                );
-                ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                showSnackBarTop(
+                    "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
               }),
           currentUser: user,
           typingUsers: _typingUsers,
@@ -2389,90 +2485,101 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
 
     return Scaffold(
+      key: _scaffoldKey,
       drawer: _buildDrawer(context),
       appBar: AppBar(
-          // TRY THIS: Try changing the color here to a specific color (to
-          // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-          // change color while the other colors stay the same.
+          leading: IconButton(
+            padding: actionIconPadding,
+            icon: const Icon(Icons.menu,
+                size: actionIconSize), // change this size and style
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          ),
           backgroundColor: Theme.of(context).colorScheme.primary,
-          // Here we take the value from the MyHomePage object that was created by
-          // the App.build method, and use it to set our appbar title.
           title: Row(children: [
             if (!isMobile())
-              const Expanded(
-                  child: Text(
-                "HHH",
-                style:
-                    TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
-              )),
+              Expanded(
+                  child: Text("HHH",
+                      style: TextStyle(
+                          color: headerTextColor,
+                          fontStyle: FontStyle.italic,
+                          fontSize: actionIconSize))),
             Text(
               "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
               style: TextStyle(
                   color: actionsEnabled
-                      ? (tokenOverload ? warningColor : Colors.white)
+                      ? (tokenOverload ? warningColor : headerTextColor)
                       : disabledColor),
             )
           ]),
           actions: <Widget>[
-            IconButton(
-                disabledColor: disabledColor,
+            if (_msg_streaming)
+              IconButton(
+                padding: actionIconPadding,
                 icon: Icon(
-                  Icons.sync_alt,
-                  color: iconColor,
+                  size: actionIconSize,
+                  Icons.stop,
+                  color: headerTextColor,
                 ),
-                onPressed: actionsEnabled
-                    ? () async {
-                        FilePickerResult? result =
-                            await FilePicker.platform.pickFiles();
-
-                        if (result != null) {
-                          File file = File(result.files.single.path ?? "");
-                          if (file.existsSync()) {
-                            var new_model = file.path;
-                            dlog("RELOADING FROM $new_model");
-                            reload_model_from_file(new_model);
-                          }
-                        } else {
-                          // User canceled the picker
-                        }
-                      }
-                    : null),
+                onPressed: stop_generation,
+              ),
             IconButton(
+              padding: actionIconPadding,
               disabledColor: disabledColor,
               icon: Icon(
+                size: actionIconSize,
+                Icons.psychology_sharp,
+                color: iconColor,
+              ),
+              onPressed: actionsEnabled ? show_settings_menu : null,
+            ),
+            IconButton(
+              padding: actionIconPadding,
+              disabledColor: disabledColor,
+              icon: Icon(
+                size: actionIconSize,
                 Icons.restart_alt,
                 color: iconColor,
               ),
-              onPressed: actionsEnabled
-                  ? () async {
-                      llm.clear_state();
-                      create_new_chat();
-                    }
-                  : null,
+              onPressed: actionsEnabled ? reset_current_chat : null,
             ),
-            IconButton(
-              disabledColor: disabledColor,
-              icon: Icon(
-                Icons.ios_share,
-                color: iconColor,
-              ),
-              onPressed: actionsEnabled
-                  ? () {
-                      FlutterClipboard.copy(msgs_toJson());
-
-                      const snackBar = SnackBar(
-                        content: Text('Conversation copied to clipboard'),
-                      );
-
-                      // Find the ScaffoldMessenger in the widget tree
-                      // and use it to show a SnackBar.
-                      ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                      Timer(const Duration(milliseconds: 500), () {
-                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                      });
-                    }
-                  : null,
-            )
+            PopupMenuButton<String>(
+              padding: actionIconPadding,
+              iconSize: actionIconSize,
+              onSelected: (item) {
+                switch (item) {
+                  case "model_switch":
+                    if (actionsEnabled) showModelSwitchMenu();
+                    break;
+                  case "share":
+                    executeChatShare();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem<String>(
+                    value: "model_switch",
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.sync_alt,
+                            color: Colors.black,
+                          ),
+                          Text("  Switch model")
+                        ])),
+                const PopupMenuItem<String>(
+                    value: "share",
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.ios_share,
+                            color: Colors.black,
+                          ),
+                          Text("  Share chat")
+                        ])),
+              ],
+            ),
           ],
           toolbarHeight: 48.0),
       body: Center(
@@ -2598,6 +2705,7 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     var bgColor = Theme.of(context).scaffoldBackgroundColor;
     var textColor = Theme.of(context).listTileTheme.textColor;
+    var hintColor = Theme.of(context).hintColor;
 
     return Scaffold(
       drawer: _buildDrawer(context),
@@ -2605,9 +2713,11 @@ class _SearchPageState extends State<SearchPage> {
         backgroundColor: bgColor,
         title: TextField(
           style: TextStyle(color: textColor),
+          cursorColor: textColor,
           controller: _searchController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Search message history...',
+            hintStyle: TextStyle(color: hintColor),
           ),
         ),
       ),
@@ -2909,7 +3019,8 @@ List<AppPage> _app_pages = [
 class UnderConstructionWidget extends StatelessWidget {
   final String message;
 
-  UnderConstructionWidget({this.message = 'Under construction'});
+  const UnderConstructionWidget(
+      {Key? key, this.message = 'Under construction'});
 
   @override
   Widget build(BuildContext context) {
@@ -2919,7 +3030,7 @@ class UnderConstructionWidget extends StatelessWidget {
 
     return Scaffold(
         drawer: _buildDrawer(context),
-        appBar: AppBar(),
+        appBar: AppBar(backgroundColor: bgColor),
         body: Container(
             width: screenWidth,
             child: Card(
@@ -3055,6 +3166,8 @@ class _PseudoRouter extends State<PseudoRouter> {
         currentPage = UnderConstructionWidget();
       case AppPage.help:
         currentPage = UnderConstructionWidget();
+      case AppPage.models:
+        currentPage = UnderConstructionWidget();
       default:
         currentPage = UnderConstructionWidget(message: "Unknown page");
     }
@@ -3128,16 +3241,19 @@ class HandheldHelper extends StatelessWidget {
           ? ColorScheme.fromSeed(
               seedColor: Colors.deepOrange,
               primary: const Color.fromRGBO(255, 90, 0, 1.0),
-              background: Colors.black)
+              background: Colors.black,
+              error: Colors.purple)
           : ColorScheme.fromSeed(
               seedColor: Colors.cyan.shade500,
               primary: Colors.cyan.shade100,
-              background: Colors.white),
+              background: Colors.white,
+              error: Colors.purple),
       scaffoldBackgroundColor: isDarkTheme ? Colors.black : Colors.white,
       switchTheme: SwitchThemeData(
         thumbColor: MaterialStateProperty.all(
             isDarkTheme ? Colors.orange : Colors.purple),
       ),
+      hintColor: const Color.fromRGBO(121, 107, 107, 1.0),
       listTileTheme: ListTileThemeData(
           iconColor: isDarkTheme ? Colors.orange : Colors.purple,
           textColor: isDarkTheme ? Colors.white : Colors.black,
@@ -3150,7 +3266,7 @@ class HandheldHelper extends StatelessWidget {
           iconTheme: IconThemeData(
               color: isDarkTheme ? Colors.white : Colors.black54)),
       // Additional custom color fields
-      primaryColor: isDarkTheme ? Colors.blueGrey : Colors.lightBlue,
+      // primaryColor: isDarkTheme ? Colors.blueGrey : Colors.lightBlue,
     );
   }
 

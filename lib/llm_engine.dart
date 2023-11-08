@@ -140,6 +140,11 @@ class Tokenized {
       tokens = List<String>.from(data['tokens']);
     }
   }
+
+  @override
+  String toString() {
+    return ("Tokenized{success:$success, length:$length, tokens:$tokens}");
+  }
 }
 
 String mergeAIChatPollResults(List<AIChatPollResult> updates, {sep = ""}) {
@@ -316,14 +321,15 @@ class LLMEngine {
     print("LOG sysinfo: $sysinfo");
   }
 
-  void _sync_token_count() {
-    if (initialized) {
-      var tok = tokenize(format_chatml(msgs));
-      if (tok.success) {
-        tokens_used = tok.length;
-      }
-    }
-  }
+  // void _sync_token_count() {
+  //   if (initialized) {
+  //     var tok = tokenize(format_chatml(msgs));
+  //     print(tok.toString());
+  //     if (tok.success) {
+  //       tokens_used = tok.length;
+  //     }
+  //   }
+  // }
 
   int measure_tokens(String s) {
     if (s.isEmpty) {
