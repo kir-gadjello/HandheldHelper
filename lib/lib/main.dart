@@ -1825,6 +1825,16 @@ LLMEngine llm = LLMEngine();
 //   abort() {}
 // }
 
+void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
+  if (flags?.containsKey("_canceled_by_user") ?? false) {
+    ret.customBackgroundColor = Colors.orange.shade600;
+    ret.customTextColor = Colors.black;
+  } else if (flags?.containsKey("_interrupted") ?? false) {
+    ret.customBackgroundColor = const Color.fromRGBO(200, 80, 80, 1.0);
+    ret.customTextColor = Colors.white;
+  }
+}
+
 List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
   return msgs.map((m) {
     var ret = ChatMessage(
@@ -1833,13 +1843,7 @@ List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
         createdAt: DateTime.fromMillisecondsSinceEpoch(m.date * 1000),
         customProperties: m.meta);
 
-    if (m.meta?.containsKey("_canceled_by_user") ?? false) {
-      ret.customBackgroundColor = Colors.orange.shade600;
-      ret.customTextColor = Colors.black;
-    } else if (m.meta?.containsKey("_interrupted") ?? false) {
-      ret.customBackgroundColor = const Color.fromRGBO(200, 80, 80, 1.0);
-      ret.customTextColor = Colors.white;
-    }
+    markChatMessageSpecial(ret, m.meta);
 
     return ret;
   }).toList();
@@ -2195,6 +2199,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             };
           }
         }
+
+        markChatMessageSpecial(_messages[0], _messages[0].customProperties);
 
         _typingUsers = [];
       } else {
