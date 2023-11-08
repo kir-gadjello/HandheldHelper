@@ -18,6 +18,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
+import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:external_path/external_path.dart';
 import 'util.dart';
 
@@ -1825,12 +1826,23 @@ LLMEngine llm = LLMEngine();
 // }
 
 List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
-  return msgs
-      .map((m) => ChatMessage(
-          user: getChatUserByName(m.username),
-          text: m.message,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(m.date * 1000)))
-      .toList();
+  return msgs.map((m) {
+    var ret = ChatMessage(
+        user: getChatUserByName(m.username),
+        text: m.message,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(m.date * 1000),
+        customProperties: m.meta);
+
+    if (m.meta?.containsKey("_canceled_by_user") ?? false) {
+      ret.customBackgroundColor = Colors.orange.shade600;
+      ret.customTextColor = Colors.black;
+    } else if (m.meta?.containsKey("_interrupted") ?? false) {
+      ret.customBackgroundColor = const Color.fromRGBO(200, 80, 80, 1.0);
+      ret.customTextColor = Colors.white;
+    }
+
+    return ret;
+  }).toList();
 }
 
 class ActiveChatDialogState extends State<ActiveChatDialog>
@@ -2129,18 +2141,43 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     _messages.insert(0, cmsg);
   }
 
-  Future<void> updateStreamingMsgView() async {
+  Future<void> updateStreamingMsgView({canceled = false}) async {
     Chat current = await getCurrentChat();
 
-    var poll_result = llm.poll_advance_stream();
-    var finished = poll_result.finished;
+    var finished = false;
+    var interrupted_by_user = canceled;
+    AIChatMessage? completedMsg;
 
-    if (finished) {
-      var completedMsg = llm.msgs.last;
-      chatManager.addMessageToChat(current.uuid, completedMsg.content, "AI");
-      await metaKV.deleteMetadata("_msg_stream_in_progress_");
+    if (!canceled) {
+      var poll_result = llm.poll_advance_stream();
+      finished = poll_result.finished;
+
+      if (finished) {
+        completedMsg = llm.msgs.last;
+        if (completedMsg.role == "assistant") {
+          chatManager.addMessageToChat(
+              current.uuid, completedMsg.content, "AI");
+          await metaKV.deleteMetadata("_msg_stream_in_progress_");
+        } else {
+          print("ERROR: COULD NOT GENERATE STREAMING MESSAGE");
+          // TODO handle this hypo case
+        }
+      } else {
+        await metaKV.setMetadata(
+            "_msg_stream_in_progress_", llm.stream_msg_acc);
+      }
     } else {
-      await metaKV.setMetadata("_msg_stream_in_progress_", llm.stream_msg_acc);
+      finished = true;
+      // llm.msgs.last;
+      if (llm.streaming && llm.stream_msg_acc.isNotEmpty) {
+        completedMsg = AIChatMessage("assistant", llm.stream_msg_acc);
+        chatManager.addMessageToChat(current.uuid, completedMsg.content, "AI",
+            meta: {"_interrupted": true, "_canceled_by_user": true});
+        await metaKV.deleteMetadata("_msg_stream_in_progress_");
+      } else {
+        print("LLM HAS NOT STARTED GENERATING YET");
+        // TODO handle
+      }
     }
 
     setState(() {
@@ -2148,10 +2185,16 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         _msg_poll_timer?.cancel();
         _msg_streaming = false;
 
-        var completedMsg = llm.msgs.last;
-
-        _messages[0].createdAt = completedMsg.createdAt;
-        _messages[0].text = completedMsg.content;
+        if (completedMsg != null) {
+          _messages[0].createdAt = completedMsg.createdAt;
+          _messages[0].text = completedMsg.content;
+          if (interrupted_by_user) {
+            _messages[0].customProperties = {
+              "_interrupted": true,
+              "_canceled_by_user": true
+            };
+          }
+        }
 
         _typingUsers = [];
       } else {
@@ -2336,8 +2379,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     create_new_chat();
   }
 
-  stop_generation() {
-    // TODO
+  stop_llm_generation() {
+    if (_msg_streaming) {
+      updateStreamingMsgView(canceled: true);
+    }
   }
 
   show_settings_menu() {
@@ -2520,7 +2565,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                   Icons.stop,
                   color: headerTextColor,
                 ),
-                onPressed: stop_generation,
+                onPressed: stop_llm_generation,
               ),
             IconButton(
               padding: actionIconPadding,
@@ -3235,7 +3280,7 @@ class HandheldHelper extends StatelessWidget {
   const HandheldHelper({super.key});
 
   ThemeData getAppTheme(BuildContext context, bool isDarkTheme) {
-    return ThemeData(
+    var baseTheme = ThemeData(
       useMaterial3: true,
       colorScheme: isDarkTheme
           ? ColorScheme.fromSeed(
@@ -3267,6 +3312,16 @@ class HandheldHelper extends StatelessWidget {
               color: isDarkTheme ? Colors.white : Colors.black54)),
       // Additional custom color fields
       // primaryColor: isDarkTheme ? Colors.blueGrey : Colors.lightBlue,
+    );
+
+    return baseTheme.copyWith(
+      extensions: <ThemeExtension<dynamic>>[
+        const ExtendedThemeData(
+          warning: const Color.fromRGBO(210, 170, 98, 1.0),
+          info: const Color.fromRGBO(141, 134, 124, 1.0),
+          chatMsgWarningFontSize: 14,
+        ),
+      ],
     );
   }
 

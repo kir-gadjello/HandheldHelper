@@ -3,15 +3,30 @@ import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
 // import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_prism/flutter_prism.dart';
+import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:markdown_viewer/markdown_viewer.dart';
 import 'package:intl/intl.dart' as intl;
+import 'package:flutter/material.dart' show Icon, Icons;
 
 final USE_MARKDOWN = true;
 
-Widget MdViewer(String data, BuildContext context, bool isOwnMessage,
-    MessageOptions messageOptions) {
+Widget MdViewer(
+    String data,
+    BuildContext context,
+    bool isOwnMessage,
+    MessageOptions messageOptions,
+    Color? customBackgroundColor,
+    Color? customTextColor) {
   var bgColor = Theme.of(context).listTileTheme.tileColor;
   var textColor = Theme.of(context).listTileTheme.textColor;
+
+  if (customBackgroundColor != null) {
+    bgColor = customBackgroundColor!;
+  }
+
+  if (customTextColor != null) {
+    textColor = customTextColor;
+  }
 
   return MarkdownViewer(
     data,
@@ -77,13 +92,30 @@ class RichMessageText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    var bgColor = Theme.of(context).listTileTheme.tileColor;
+    if (message.customBackgroundColor != null) {
+      bgColor = message.customBackgroundColor!;
+    }
+    var extThemeData = Theme.of(context).extension<ExtendedThemeData>()!;
+
+    var _interrupted = false;
+    var _canceled_by_user = false;
+
+    if (message.customProperties != null) {
+      _interrupted = message.customProperties!.containsKey("_interrupted");
+      _canceled_by_user =
+          message.customProperties!.containsKey("_canceled_by_user");
+    }
     return Column(
       crossAxisAlignment:
           isOwnMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: <Widget>[
         Wrap(
           children: USE_MARKDOWN
-              ? [MdViewer(message.text, context, isOwnMessage, messageOptions)]
+              ? [
+                  MdViewer(message.text, context, isOwnMessage, messageOptions,
+                      message.customBackgroundColor, message.customTextColor)
+                ]
               : getMessage(context),
         ),
         if (messageOptions.showTime)
@@ -102,6 +134,32 @@ class RichMessageText extends StatelessWidget {
                     ),
                   ),
                 ),
+        if (_interrupted && !_canceled_by_user)
+          Padding(
+              padding: const EdgeInsets.fromLTRB(4.0, 5.0, 0, 0),
+              child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                Icon(Icons.warning_amber_sharp,
+                    color: extThemeData.warning,
+                    size: extThemeData.chatMsgWarningFontSize! + 2),
+                const SizedBox(width: 2.0),
+                Text("AI answer generation was interrupted for this message",
+                    style: TextStyle(
+                        color: extThemeData.warning,
+                        fontSize: extThemeData.chatMsgWarningFontSize))
+              ])),
+        if (_canceled_by_user)
+          Padding(
+              padding: const EdgeInsets.fromLTRB(4.0, 5.0, 0, 0),
+              child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                Icon(Icons.warning_amber_sharp,
+                    color: extThemeData.info,
+                    size: extThemeData.chatMsgWarningFontSize! + 2),
+                const SizedBox(width: 2.0),
+                Text("You canceled generation of this message",
+                    style: TextStyle(
+                        color: extThemeData.info,
+                        fontSize: extThemeData.chatMsgWarningFontSize))
+              ]))
       ],
     );
   }
