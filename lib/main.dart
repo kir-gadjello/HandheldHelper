@@ -20,6 +20,7 @@ import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
 import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:external_path/external_path.dart';
+import 'package:flutter_color/flutter_color.dart';
 import 'util.dart';
 
 final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
@@ -2713,7 +2714,7 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
   final ChatManager _chatManager = ChatManager();
   Timer? _debounceTimer;
-  Future<List<(Chat, Message)>>? _searchResults;
+  Future<List<(Chat, List<Message>)>>? _searchResults;
 
   @override
   void initState() {
@@ -2735,8 +2736,8 @@ class _SearchPageState extends State<SearchPage> {
     _debounceTimer = Timer(Duration(milliseconds: SEARCH_THROTTLE), () async {
       if (_searchController.text.isNotEmpty) {
         setState(() {
-          _searchResults = _chatManager.searchMessages(_searchController.text,
-              prefixQuery: true);
+          _searchResults = _chatManager
+              .searchMessagesGrouped(_searchController.text, prefixQuery: true);
         });
       } else {
         setState(() {
@@ -2747,10 +2748,10 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildSearchResults() {
-    return FutureBuilder<List<(Chat, Message)>>(
+    return FutureBuilder<List<(Chat, List<Message>)>>(
       future: _searchResults,
       builder: (BuildContext context,
-          AsyncSnapshot<List<(Chat, Message)>> snapshot) {
+          AsyncSnapshot<List<(Chat, List<Message>)>> snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return hhhLoader(context);
         } else if (snapshot.hasError) {
@@ -2761,8 +2762,8 @@ class _SearchPageState extends State<SearchPage> {
               child: ListView.builder(
                 itemCount: snapshot?.data?.length ?? 0,
                 itemBuilder: (context, index) {
-                  final (chat, message) = snapshot.data![index];
-                  return _buildSearchResultItem(chat, message);
+                  final (chat, messages) = snapshot.data![index];
+                  return _buildSearchResultItem(chat, messages);
                 },
               ));
         }
@@ -2770,12 +2771,51 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _buildSearchResultItem(Chat chat, Message message) {
-    var bgColor = Theme.of(context).listTileTheme.tileColor;
+  Widget _buildSearchResultItem(Chat chat, List<Message> messages) {
+    var bgColor = Theme.of(context).listTileTheme.tileColor!;
+    var bg2Color = bgColor.lighter(30);
     var textColor = Theme.of(context).listTileTheme.textColor;
 
+    Widget msgs;
+
+    if (messages.length > 1) {
+      msgs = Column(
+          children: messages
+              .map((m) => Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 2.0, horizontal: 4.0),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(2)),
+                    minVerticalPadding: 2.0,
+                    tileColor: bg2Color,
+                    textColor: textColor,
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 2.0, horizontal: 4.0),
+                    title: Container(child: Text(m.message)),
+                    onTap: () {
+                      // Callback with relevant chatId and messageId
+                    },
+                  )))
+              .toList());
+    } else {
+      // msgs = Text(messages[0].message);
+      msgs = ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+        minVerticalPadding: 2.0,
+        tileColor: bg2Color,
+        textColor: textColor,
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+        title: Container(child: Text(messages[0].message)),
+        onTap: () {
+          // Callback with relevant chatId and messageId
+        },
+      );
+    }
+
     return Padding(
-        padding: EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+        padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
         child: Container(
           constraints: isMobile()
               ? null
@@ -2791,9 +2831,9 @@ class _SearchPageState extends State<SearchPage> {
             textColor: textColor,
             minVerticalPadding: 2.0,
             contentPadding:
-                EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
-            title: Text(message.message),
-            subtitle: Text(chat.getHeading()),
+                const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+            subtitle: msgs,
+            title: Text(chat.getHeading()),
             onTap: () {
               // Callback with relevant chatId and messageId
             },

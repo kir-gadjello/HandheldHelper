@@ -138,12 +138,13 @@ class Uuid {
     } else {
       ret = other is Uuid && listEquals(other._bytes, _bytes);
     }
-    // print("UUID EQ TEST ==: ${this.toString()} ? ${other.toString()} = $ret");
     return ret;
   }
 
+  // Hash by content
   @override
-  int get hashCode => _bytes.hashCode;
+  int get hashCode => _bytes.fold(
+      0, (previousValue, element) => previousValue + element.hashCode);
 
   String get asString => base64UrlEncode(_bytes);
 
@@ -713,6 +714,47 @@ class ChatManager {
     }
 
     return output;
+  }
+
+  Future<List<(Chat, List<Message>)>> searchMessagesGrouped(String substring,
+      {bool prefixQuery = false}) async {
+    final db = await _databaseHelper.database;
+    final results = await search_fields(db, 'messages', ['message'], substring,
+        prefixQuery: prefixQuery);
+
+    if (results.isEmpty) {
+      return [];
+    }
+
+    Map<Uuid, List<Message>> output = {};
+
+    for (var result in results) {
+      Uuid msgUuid = Uuid.fromBytes(result['uuid']);
+      Uuid chatUuid = Uuid.fromBytes(result['chat_uuid']);
+      var chatUuidKey = chatUuid;
+
+      Message? message = await getMessage(msgUuid);
+      if (chatUuidKey != null && message != null) {
+        if (!output.containsKey(chatUuidKey)) {
+          output[chatUuidKey] = [];
+        }
+        output[chatUuidKey]!.add(message);
+      }
+    }
+
+    List<(Chat, List<Message>)> list = [];
+
+    for (var entry in output.entries) {
+      var chat = await getChat(entry.key);
+      if (chat != null) {
+        list.add((chat, entry.value));
+      }
+    }
+
+    // Sort the list by chat's createdAt field in descending order
+    list.sort((a, b) => b.$1.date.compareTo(a.$1.date));
+
+    return list;
   }
 
   Future<Message?> getMessage(Uuid messageId) async {
