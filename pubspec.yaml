@@ -129,6 +129,8 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: false
   image_path: "assets/handheld_helper_launcher_icon_v1.png"
+  adaptive_icon_background: "#0021334E"
+  adaptive_icon_foreground: "assets/handheld_helper_launcher_icon_v1.png"
   macos:
     generate: true
     image_path: "assets/handheld_helper_launcher_icon_v1.png"

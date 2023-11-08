@@ -23,25 +23,6 @@ import 'util.dart';
 
 final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
 
-Future<int> checkFileSize(String path) async {
-  try {
-    // Resolve symbolic links
-    String resolvedPath = await File(path).resolveSymbolicLinks();
-
-    // Check if file exists
-    if (await File(resolvedPath).exists()) {
-      // Get file size
-      int size = await File(resolvedPath).length();
-      return size;
-    }
-  } catch (e) {
-    // If the file does not exist or is a directory, return -1
-    return -1;
-  }
-
-  return -1;
-}
-
 Future<void> requestStoragePermission() async {
   var status = await Permission.manageExternalStorage.request();
   if (status.isGranted) {
@@ -740,9 +721,12 @@ Future<AppInitParams> perform_app_init() async {
 //   State<MyHomePage> createState() => _MyHomePageState();
 // }
 
-Widget hhhLoader({double size = 50}) {
+Widget hhhLoader(BuildContext context, {double size = 50}) {
+  var bgColor = Theme.of(context).listTileTheme.tileColor;
+  var textColor = Theme.of(context).listTileTheme.textColor;
+
   return Container(
-      color: Colors.white,
+      color: bgColor,
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Stack(alignment: Alignment.center, children: [
           Center(
@@ -753,7 +737,7 @@ Widget hhhLoader({double size = 50}) {
                     "HHH",
                     style: TextStyle(
                         fontSize: size / 10,
-                        color: Colors.lightBlue.shade200,
+                        color: textColor,
                         fontStyle: FontStyle.italic,
                         decoration: TextDecoration.none,
                         fontWeight: FontWeight.bold),
@@ -805,7 +789,7 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
       future: futureHHHDefaults,
       builder: (BuildContext context, AsyncSnapshot<AppInitParams> snapshot) {
         if (true && snapshot.connectionState == ConnectionState.waiting) {
-          return hhhLoader(
+          return hhhLoader(context,
               size: MediaQuery.of(context).size.shortestSide * 0.65);
         } else if (snapshot.hasError) {
           return Text('Error: ${snapshot.error}');
@@ -866,12 +850,6 @@ const WorkspaceRoot = "HHH";
 //
 //   throw FileSystemException("File not found", llm_file);
 // }
-
-String truncateWithEllipsis(int cutoff, String myString) {
-  return (myString.length <= cutoff)
-      ? myString
-      : '${myString.substring(0, cutoff)}...';
-}
 
 const hermes_sysmsg =
     "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
@@ -2333,6 +2311,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     Widget mainWidget;
 
+    var bgColor = Theme.of(context).listTileTheme.tileColor;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+
     if (app_setup_done()) {
       initAIifNotAlready();
       mainWidget = Expanded(
@@ -2354,7 +2335,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                   _update_token_counter(upd);
                 });
               }),
+          messageListOptions: MessageListOptions(),
           messageOptions: MessageOptions(
+              containerColor: bgColor!,
+              currentUserContainerColor: bgColor!,
+              textColor: textColor!,
+              currentUserTextColor: textColor!,
               messageTextBuilder: customMessageTextBuilder,
               showCurrentUserAvatar: false,
               showOtherUsersAvatar: false,
@@ -2408,7 +2394,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           // TRY THIS: Try changing the color here to a specific color (to
           // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
           // change color while the other colors stay the same.
-          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          backgroundColor: Theme.of(context).colorScheme.primary,
           // Here we take the value from the MyHomePage object that was created by
           // the App.build method, and use it to set our appbar title.
           title: Row(children: [
@@ -2559,44 +2545,66 @@ class _SearchPageState extends State<SearchPage> {
       builder: (BuildContext context,
           AsyncSnapshot<List<(Chat, Message)>> snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return hhhLoader();
+          return hhhLoader(context);
         } else if (snapshot.hasError) {
           return Text('Error: ${snapshot.error}');
         } else {
-          return ListView.builder(
-            itemCount: snapshot?.data?.length ?? 0,
-            itemBuilder: (context, index) {
-              final (chat, message) = snapshot.data![index];
-              return _buildSearchResultItem(chat, message);
-            },
-          );
+          return Padding(
+              padding: EdgeInsets.symmetric(vertical: 2.0, horizontal: 0.0),
+              child: ListView.builder(
+                itemCount: snapshot?.data?.length ?? 0,
+                itemBuilder: (context, index) {
+                  final (chat, message) = snapshot.data![index];
+                  return _buildSearchResultItem(chat, message);
+                },
+              ));
         }
       },
     );
   }
 
   Widget _buildSearchResultItem(Chat chat, Message message) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10.0),
-        border: Border.all(color: Colors.grey),
-      ),
-      child: ListTile(
-        title: Text(message.message),
-        trailing: Text(chat.getHeading()),
-        onTap: () {
-          // Callback with relevant chatId and messageId
-        },
-      ),
-    );
+    var bgColor = Theme.of(context).listTileTheme.tileColor;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+
+    return Padding(
+        padding: EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+        child: Container(
+          constraints: isMobile()
+              ? null
+              : BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.33,
+                ),
+          decoration: BoxDecoration(
+            // borderRadius: BorderRadius.circular(10.0),
+            border: Border.all(color: Colors.grey),
+          ),
+          child: ListTile(
+            tileColor: bgColor,
+            textColor: textColor,
+            minVerticalPadding: 2.0,
+            contentPadding:
+                EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+            title: Text(message.message),
+            subtitle: Text(chat.getHeading()),
+            onTap: () {
+              // Callback with relevant chatId and messageId
+            },
+          ),
+        ));
   }
 
   @override
   Widget build(BuildContext context) {
+    var bgColor = Theme.of(context).scaffoldBackgroundColor;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+
     return Scaffold(
       drawer: _buildDrawer(context),
       appBar: AppBar(
+        backgroundColor: bgColor,
         title: TextField(
+          style: TextStyle(color: textColor),
           controller: _searchController,
           decoration: const InputDecoration(
             hintText: 'Search message history...',
@@ -2879,6 +2887,7 @@ enum AppPage {
   settings,
   search,
   history,
+  models,
   help,
 }
 
@@ -2893,42 +2902,83 @@ List<AppPage> _app_pages = [
   AppPage.search,
   AppPage.history,
   AppPage.settings,
+  AppPage.models,
   AppPage.help,
 ];
 
-String capitalizeAllWord(String value) {
-  var result = value[0].toUpperCase();
-  for (int i = 1; i < value.length; i++) {
-    if (value[i - 1] == " ") {
-      result = result + value[i].toUpperCase();
-    } else {
-      result = result + value[i];
-    }
+class UnderConstructionWidget extends StatelessWidget {
+  final String message;
+
+  UnderConstructionWidget({this.message = 'Under construction'});
+
+  @override
+  Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+    var fgColor = Theme.of(context).colorScheme.primary!;
+
+    return Scaffold(
+        drawer: _buildDrawer(context),
+        appBar: AppBar(),
+        body: Container(
+            width: screenWidth,
+            child: Card(
+              color: bgColor,
+              margin: EdgeInsets.all(20.0),
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(
+                      Icons.warning_rounded,
+                      size: 50,
+                      color: fgColor,
+                    ),
+                    SizedBox(height: 20),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: fgColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )));
   }
-  return result;
 }
 
 Drawer _buildDrawer(BuildContext context) {
   final navigationProvider = NavigationProvider.of(context);
   final navigate = navigationProvider?.navigate;
 
+  var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+  var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
+
   return Drawer(
       child: Container(
+    color: bgColor,
     child: ListView(
       children: _app_pages.map((page) {
         final selected = page == global_current_page;
         final textStyle = TextStyle(
             color: selected
-                ? Colors.white
+                ? fgColor
                 : Theme.of(context).colorScheme.inversePrimary,
             fontSize: 28);
         return ListTile(
           selected: selected,
           titleTextStyle: textStyle,
-          tileColor: selected ? Colors.lightBlueAccent : Colors.white,
+          // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
           title: Text(getPageName(page, capitalize: true)),
           onTap: () {
-            if (navigate != null) navigate(page);
+            if (navigate != null) {
+              navigate(page);
+            }
+            Navigator.pop(context); // Close the drawer
           },
         );
       }).toList(),
@@ -2969,13 +3019,17 @@ class _PseudoRouter extends State<PseudoRouter> {
   AppPage _currentPage = AppPage.conversation;
 
   void navigate(AppPage page, {VoidCallback? onBeforeNavigate}) {
-    if (onBeforeNavigate != null) {
-      onBeforeNavigate();
+    try {
+      if (onBeforeNavigate != null) {
+        onBeforeNavigate();
+      }
+      setState(() {
+        global_current_page = page;
+        _currentPage = page;
+      });
+    } catch (e) {
+      print('Navigation error: $e');
     }
-    setState(() {
-      global_current_page = page;
-      _currentPage = page;
-    });
   }
 
   @override
@@ -2987,22 +3041,40 @@ class _PseudoRouter extends State<PseudoRouter> {
   }
 
   Widget _buildPage(AppPage page) {
+    Widget currentPage;
+
     switch (page) {
       case AppPage.conversation:
-        return ActiveChatPage(
+        currentPage = ActiveChatPage(
             title: APP_TITLE, appInitParams: widget.appInitParams);
       case AppPage.settings:
-        return SearchPage();
+        currentPage = UnderConstructionWidget();
       case AppPage.search:
-        return SearchPage();
+        currentPage = SearchPage();
       case AppPage.history:
-        return SearchPage();
+        currentPage = UnderConstructionWidget();
       case AppPage.help:
-        return SearchPage();
+        currentPage = UnderConstructionWidget();
       default:
-        return ActiveChatPage(
-            title: APP_TITLE, appInitParams: widget.appInitParams);
+        currentPage = UnderConstructionWidget(message: "Unknown page");
     }
+
+    return currentPage;
+    // return PageRouteBuilder(
+    //   pageBuilder: (context, animation, secondaryAnimation) => currentPage,
+    //   transitionsBuilder: (context, animation, secondaryAnimation, child) {
+    //     // Add your custom transition here
+    //     var begin = Offset(0.0, 1.0);
+    //     var end = Offset.zero;
+    //     var curve = Curves.ease;
+    //     var tween =
+    //         Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+    //     return SlideTransition(
+    //       position: animation.drive(tween),
+    //       child: child,
+    //     );
+    //   },
+    // ).pageBuilder(context);
   }
 }
 
@@ -3026,12 +3098,24 @@ class _AppStartupState extends State<AppStartup> {
         future: _appInitFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return hhhLoader(
+            return hhhLoader(context,
                 size: MediaQuery.of(context).size.shortestSide * 0.65);
           }
           return PseudoRouter(snapshot.data!);
         });
   }
+}
+
+class HexColor extends Color {
+  static int _getColorFromHex(String hexColor) {
+    hexColor = hexColor.toUpperCase().replaceAll("#", "");
+    if (hexColor.length == 6) {
+      hexColor = "FF" + hexColor;
+    }
+    return int.parse(hexColor, radix: 16);
+  }
+
+  HexColor(final String hexColor) : super(_getColorFromHex(hexColor));
 }
 
 class HandheldHelper extends StatelessWidget {
@@ -3040,29 +3124,33 @@ class HandheldHelper extends StatelessWidget {
   ThemeData getAppTheme(BuildContext context, bool isDarkTheme) {
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100),
+      colorScheme: isDarkTheme
+          ? ColorScheme.fromSeed(
+              seedColor: Colors.deepOrange,
+              primary: const Color.fromRGBO(255, 90, 0, 1.0),
+              background: Colors.black)
+          : ColorScheme.fromSeed(
+              seedColor: Colors.cyan.shade500,
+              primary: Colors.cyan.shade100,
+              background: Colors.white),
       scaffoldBackgroundColor: isDarkTheme ? Colors.black : Colors.white,
-      textTheme: Theme.of(context)
-          .textTheme
-          .copyWith(
-            titleSmall:
-                Theme.of(context).textTheme.titleSmall?.copyWith(fontSize: 11),
-          )
-          .apply(
-            bodyColor: isDarkTheme ? Colors.white : Colors.black,
-            displayColor: Colors.grey,
-          ),
       switchTheme: SwitchThemeData(
         thumbColor: MaterialStateProperty.all(
             isDarkTheme ? Colors.orange : Colors.purple),
       ),
       listTileTheme: ListTileThemeData(
-          iconColor: isDarkTheme ? Colors.orange : Colors.purple),
+          iconColor: isDarkTheme ? Colors.orange : Colors.purple,
+          textColor: isDarkTheme ? Colors.white : Colors.black,
+          tileColor:
+              isDarkTheme ? Colors.grey.shade900 : Colors.lightBlue.shade50),
       appBarTheme: AppBarTheme(
-          backgroundColor: isDarkTheme ? Colors.black : Colors.white,
+          backgroundColor:
+              isDarkTheme ? Colors.grey.shade800 : Colors.lightBlue.shade600,
+          foregroundColor: isDarkTheme ? Colors.white70 : Colors.black,
           iconTheme: IconThemeData(
               color: isDarkTheme ? Colors.white : Colors.black54)),
+      // Additional custom color fields
+      primaryColor: isDarkTheme ? Colors.blueGrey : Colors.lightBlue,
     );
   }
 
@@ -3083,7 +3171,7 @@ class HandheldHelper extends StatelessWidget {
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
 
-      theme: getAppTheme(context, false),
+      theme: getAppTheme(context, true),
 
       //theme: ThemeData(
       //   colorScheme: colorScheme,

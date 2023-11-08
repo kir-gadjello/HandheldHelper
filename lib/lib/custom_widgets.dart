@@ -8,7 +8,11 @@ import 'package:intl/intl.dart' as intl;
 
 final USE_MARKDOWN = true;
 
-Widget MdViewer(String data, BuildContext context, bool isOwnMessage, MessageOptions messageOptions) {
+Widget MdViewer(String data, BuildContext context, bool isOwnMessage,
+    MessageOptions messageOptions) {
+  var bgColor = Theme.of(context).listTileTheme.tileColor;
+  var textColor = Theme.of(context).listTileTheme.textColor;
+
   return MarkdownViewer(
     data,
     enableTaskList: true,
@@ -36,14 +40,15 @@ Widget MdViewer(String data, BuildContext context, bool isOwnMessage, MessageOpt
     // elementBuilders: [
     //   ExampleBuilder(),
     // ],
-    styleSheet: const MarkdownStyle(
+    styleSheet: MarkdownStyle(
+      textStyle: TextStyle(color: textColor, backgroundColor: bgColor),
       listItemMarkerTrailingSpace: 12,
       // (isOwnMessage ? messageOptions.currentUserTextColor(context) : messageOptions.textColor
       // codeSpan: TextStyle(color: Color.black,
       //   decoration: TextDecoration.none,
       //   fontWeight: FontWeight.w600,
       // ),
-      codeBlock: TextStyle(
+      codeBlock: const TextStyle(
         fontSize: 14,
         letterSpacing: 1.0,
         fontFamily: 'RobotoMono',
@@ -77,7 +82,9 @@ class RichMessageText extends StatelessWidget {
           isOwnMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: <Widget>[
         Wrap(
-          children: USE_MARKDOWN ? [MdViewer(message.text, context, isOwnMessage, messageOptions)] : getMessage(context),
+          children: USE_MARKDOWN
+              ? [MdViewer(message.text, context, isOwnMessage, messageOptions)]
+              : getMessage(context),
         ),
         if (messageOptions.showTime)
           messageOptions.messageTimeBuilder != null
