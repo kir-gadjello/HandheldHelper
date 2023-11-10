@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -7,8 +6,6 @@ import 'package:path/path.dart' as Path;
 import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:dio/dio.dart';
-import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -19,7 +16,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
 import 'package:handheld_helper/flutter_customizations.dart';
-import 'package:external_path/external_path.dart';
 import 'package:flutter_color/flutter_color.dart';
 import 'util.dart';
 
@@ -36,6 +32,163 @@ Future<void> requestStoragePermission() async {
     print('Storage permission granted');
   } else if (status.isPermanentlyDenied) {
     openAppSettings();
+  }
+}
+
+// Global storage for progress speeds
+Map<String, double> progressSpeeds = {};
+
+class SelfCalibratingProgressBar extends StatefulWidget {
+  final double progress;
+  final double workAmount;
+  final String pkey;
+  final double speedUnderestimate = 0.8;
+  final Function(String, double)? persistCallback;
+  final double? Function(String)? restoreCallback;
+  final Widget Function(double progress)? progressBarBuilder;
+
+  SelfCalibratingProgressBar({
+    required this.progress,
+    required this.workAmount,
+    required this.pkey,
+    this.persistCallback,
+    this.restoreCallback,
+    this.progressBarBuilder,
+  });
+
+  @override
+  _SelfCalibratingProgressBarState createState() =>
+      _SelfCalibratingProgressBarState();
+}
+
+class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
+    with SingleTickerProviderStateMixin {
+  double? progressSpeed;
+  late DateTime previousTimestamp;
+  late double previousProgress;
+  bool initialUpdate = true;
+  AnimationController? _controller;
+
+  @override
+  void initState() {
+    print("SelfCalibratingProgressBar: initState");
+    super.initState();
+    progressSpeed = restoreSpEst(); // todo
+    previousTimestamp = DateTime.now();
+    previousProgress = widget.progress;
+  }
+
+  @override
+  void didUpdateWidget(SelfCalibratingProgressBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (initialUpdate ||
+        oldWidget.progress != widget.progress ||
+        oldWidget.workAmount != widget.workAmount ||
+        oldWidget.pkey != widget.pkey) {
+      calibrateProgressSpeed();
+    }
+  }
+
+  void persistSpEst(double progressSpeed) {
+    if (widget.persistCallback != null) {
+      widget.persistCallback!(widget.pkey, progressSpeed);
+    } else {
+      progressSpeeds[widget.pkey] = progressSpeed;
+    }
+  }
+
+  double? restoreSpEst() {
+    double? ret;
+    if (widget.persistCallback != null) {
+      ret = widget.restoreCallback!(widget.pkey);
+    }
+    if (progressSpeeds.containsKey(widget.pkey)) {
+      ret = progressSpeeds[widget.pkey];
+    }
+    if (ret != null && widget.speedUnderestimate != 1.0) {
+      ret = widget.speedUnderestimate * ret!;
+    }
+  }
+
+  void calibrateProgressSpeed() {
+    print("calibrateProgressSpeed(): $previousProgress -> ${widget.progress}");
+
+    DateTime currentTimestamp = DateTime.now();
+    double timeDifference =
+        currentTimestamp.difference(previousTimestamp).inMilliseconds * 1.0;
+
+    if (initialUpdate) {
+      var _progressSpeed = restoreSpEst();
+      if (_progressSpeed != null) {
+        progressSpeed = _progressSpeed!;
+      }
+    } else if (widget.progress != previousProgress && timeDifference > 0) {
+      progressSpeed = widget.workAmount *
+          (widget.progress - previousProgress) /
+          timeDifference;
+      persistSpEst(progressSpeed!);
+      print("PROGRESS SPEED: ${(progressSpeed! * 1000.0).round()}T/s");
+    }
+
+    previousTimestamp = currentTimestamp;
+    previousProgress = widget.progress;
+
+    if (initialUpdate) {
+      initialUpdate = false;
+    }
+
+    if (progressSpeed != null) {
+      updateControllerExpectedDuration(progressSpeed!);
+    }
+
+    setState(() {});
+  }
+
+  void updateControllerExpectedDuration(double progressSpeed) {
+    var duration = Duration(
+        milliseconds:
+            (widget.workAmount * (1.0 - widget.progress) / progressSpeed)
+                .round());
+
+    if (_controller == null) {
+      print(
+          "CREATE ANIMATION CONTROLLER, widget.progress=${widget.progress} DURATION=${duration.inMilliseconds}ms");
+      _controller = AnimationController(
+        value: widget.progress,
+        vsync: this,
+        duration: duration,
+      );
+      _controller!.forward(from: widget.progress);
+    } else {
+      _controller!.reset();
+      _controller!.duration = duration;
+      _controller!.value = widget.progress;
+      _controller!.forward(from: widget.progress);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // if (!_controller.isAnimating) {
+    //   updateControllerExpectedDuration(progressSpeed);
+    // }
+    if (_controller != null) {
+      return _buildProgressBar(_controller!.view.value);
+    } else {
+      return _buildProgressBar(widget.progress);
+    }
+  }
+
+  Widget _buildProgressBar(double value) {
+    return widget.progressBarBuilder != null
+        ? widget.progressBarBuilder!(value)
+        : LinearProgressIndicator(value: value);
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
   }
 }
 
@@ -1852,6 +2005,83 @@ List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
   }).toList();
 }
 
+/// {@category Default widgets}
+class ProgressTypingBuilder extends StatelessWidget {
+  const ProgressTypingBuilder({
+    required this.user,
+    this.pkey = "undefined",
+    this.text = 'is typing',
+    this.progress = 0.0,
+    this.workAmount = 0.0,
+    this.showProgress = false,
+    Key? key,
+  }) : super(key: key);
+
+  /// User that is typing
+  final ChatUser user;
+
+  /// Text to show after user's name in the indicator
+  final String text;
+  final String pkey;
+  final double progress;
+  final double workAmount;
+  final bool showProgress;
+
+  @override
+  Widget build(BuildContext context) {
+    print("ProgressTypingBuilder workAmount=$workAmount");
+
+    var bgColor = Theme.of(context).primaryColorDark;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 15, top: 25),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          const Padding(
+            padding: EdgeInsets.only(right: 2),
+            child: TypingIndicator(),
+          ),
+          Text(
+            user.getFullName(),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+          Text(
+            ' $text',
+            style: TextStyle(
+              fontSize: 12,
+              color: textColor,
+            ),
+          ),
+          if (showProgress)
+            Expanded(
+                child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8.0, 2.0, 16.0, 2.0),
+                    child: LinearProgressIndicator(
+                        value: progress,
+                        borderRadius: BorderRadius.circular(3.0),
+                        backgroundColor: textColor,
+                        color: Colors.teal.shade600)))
+          // child: SelfCalibratingProgressBar(
+          //     pkey: pkey,
+          //     progress: progress,
+          //     workAmount: workAmount,
+          //     progressBarBuilder: (progress) => LinearProgressIndicator(
+          //         value: progress,
+          //         borderRadius: BorderRadius.circular(3.0),
+          //         backgroundColor: textColor,
+          //         color: Colors.teal.shade600))))
+        ],
+      ),
+    );
+  }
+}
+
 class ActiveChatDialogState extends State<ActiveChatDialog>
     with WidgetsBindingObserver {
   ChatManager chatManager = ChatManager();
@@ -1872,6 +2102,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   DateTime? _last_chat_persist;
   String _current_msg_input = "";
   String? _incomplete_msg;
+  double _prompt_processing_progress = 0;
+  double _prompt_processing_ntokens = 0.0;
+  DateTime? _prompt_processing_completed;
+  DateTime? _prompt_processing_initiated;
+  double llm_load_progress = 0.0;
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
@@ -1894,7 +2129,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   void dispose() {
     print("ActiveChatDialogState: attempting to persist state...");
     _cancel_timers();
-    persistState();
+    // persistState();
+    stop_llm_generation(now: true);
     super.dispose();
   }
 
@@ -2033,10 +2269,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     return false;
   }
 
-  void sync_messages_to_llm() {
+  int? sync_messages_to_llm() {
     llm.msgs = _messages
         .map((m) => AIChatMessage(m.user.getFullName(), m.text))
         .toList();
+    return llm.sync_token_count();
   }
 
   Future<bool> persistState() async {
@@ -2097,18 +2334,24 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       if (!restored) {
         // TODO: cleaner rollback logic
         _msg_streaming = false;
+        _prompt_processing_ntokens = 0.0;
+        _prompt_processing_initiated = null;
+        _prompt_processing_completed = null;
         return false;
       } else {
         // The restored state might not have finished if the persist happened mid of
         // AI writing an answer, we must handle this case and might need to restart polling timer
         if (_msg_streaming) {
+          /* for now we just add this as a message with metadata _interrupted = true
+          and restore the state to initial TODO ... */
+          _msg_streaming = false;
+          _prompt_processing_ntokens = 0.0;
+          _prompt_processing_initiated = null;
+          _prompt_processing_completed = null;
+
           var partial_answer = data['_ai_msg_stream_acc'];
           if (partial_answer is String && partial_answer.isNotEmpty) {
             print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
-
-            /* for now we just add this as a message with metadata _interrupted = true
-          and restore the state to initial TODO ... */
-            _msg_streaming = false;
 
             if (llm.streaming) {
               lock_actions();
@@ -2120,10 +2363,18 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             } else {
               await addMessageToActiveChat("ai", partial_answer,
                   meta: {"_interrupted": true});
-              setState(() {});
             }
           }
+
+          await clearPersistedState(onlyStreaming: true);
+          setState(() {});
         }
+      }
+
+      // Clean possible erroneous states, e.g. last msg is user's
+      if (_messages[0].user == user) {
+        print("LAST MESSAGE IS FROM USER, REWINDING...");
+        // TODO
       }
 
       return true;
@@ -2136,7 +2387,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   Future<void> create_new_chat() async {
     var firstMsg = ChatMessage(
       text:
-          "Beginning of conversation with model at ${llm.modelpath}\nSystem prompt: ${settings.get('system_message', hermes_sysmsg)}",
+          "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', hermes_sysmsg)}__",
       user: user_SYSTEM,
       createdAt: DateTime.now(),
     );
@@ -2148,11 +2399,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     await persistState();
 
-    sync_messages_to_llm();
+    var tokens_used = sync_messages_to_llm();
 
     setState(() {
       _msg_streaming = false;
-      _input_tokens = 0;
+      _prompt_processing_ntokens = 0.0;
+      _prompt_processing_initiated = null;
+      _prompt_processing_completed = null;
       _last_chat_persist = null;
     });
   }
@@ -2171,11 +2424,15 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       {Map<String, dynamic>? meta}) async {
     Chat current = await getCurrentChat();
     chatManager.addMessageToChat(current.uuid, msg, username, meta: meta);
+
     var cmsg = ChatMessage(
         user: getChatUserByName(username),
         createdAt: DateTime.now(),
         text: msg);
+
     _messages.insert(0, cmsg);
+    markChatMessageSpecial(cmsg, meta);
+    sync_messages_to_llm();
   }
 
   Future<void> updateStreamingMsgView(
@@ -2189,6 +2446,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (!canceled) {
       var poll_result = llm.poll_advance_stream();
       finished = poll_result.finished;
+      _prompt_processing_progress = poll_result.progress;
+      if (_prompt_processing_completed == null &&
+          (_prompt_processing_progress - 1.0).abs() < 0.01) {
+        var now = DateTime.now();
+        try {
+          print(
+              "Completed prompt processing at ${now.toString()}, time taken: ${now.difference(_prompt_processing_initiated!).inMilliseconds}ms");
+        } catch (e) {}
+        _prompt_processing_completed = now;
+      }
+      // print("PROMPT PROCESSING PROGRESS: $_prompt_processing_progress");
 
       if (finished) {
         completedMsg = llm.msgs.last;
@@ -2222,6 +2490,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       if (finished) {
         _msg_poll_timer?.cancel();
         _msg_streaming = false;
+        _prompt_processing_ntokens = 0.0;
 
         if (completedMsg != null) {
           _messages[0].createdAt = completedMsg.createdAt;
@@ -2271,6 +2540,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       'partial_msg': '',
     });
 
+    var now = DateTime.now();
+    print("Initiated prompt processing at ${now.toString()}");
+
+    _prompt_processing_ntokens = 1.0 * llm.tokenize(m.text).length;
+    _prompt_processing_initiated = now;
+    _prompt_processing_completed = null;
+
     var success = llm.start_advance_stream(user_msg: m.text);
     _msg_streaming = true;
 
@@ -2280,7 +2556,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       var msg = ChatMessage(
           user: user_ai,
           text: "...", // TODO animation
-          createdAt: llm.msgs.last.createdAt);
+          createdAt: llm.msgs.last.createdAt,
+          customProperties: {"_placeholder_ai": true});
       _messages.insert(0, msg);
       _enable_stream_poll_timer();
     });
@@ -2300,6 +2577,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     llm.reinit(
         modelpath: new_modelpath,
         llama_init_json: resolve_init_json(),
+        onProgressUpdate: (double progress) {
+          setState(() {
+            llm_load_progress = progress;
+          });
+        },
         onInitDone: () async {
           await create_new_chat();
           unlock_actions();
@@ -2332,7 +2614,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   void attemptToRestartChat() {
-    print("ActiveChatDialogState: attempting to restore state...");
+    print("ActiveChatDialogState: attemptToRestartChat()...");
     restoreState().then((success) {
       if (!success) {
         print("[ERROR] RESTORE FAILED, CREATING NEW CHAT");
@@ -2358,6 +2640,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       llm.reinit(
           modelpath: resolve_llm_file(p),
           llama_init_json: resolve_init_json(),
+          onProgressUpdate: (double progress) {
+            setState(() {
+              llm_load_progress = progress;
+            });
+          },
           onInitDone: () {
             print("ActiveChatDialogState: attempting to restore state...");
             attemptToRestartChat();
@@ -2429,15 +2716,22 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     create_new_chat();
   }
 
-  stop_llm_generation() async {
+  stop_llm_generation({now = false}) async {
     if (_msg_streaming) {
       await clearPersistedState(onlyStreaming: true);
       _msg_poll_timer?.cancel();
 
-      await llm.cancel_advance_stream(onComplete: (String final_ai_output) {
+      void onComplete(String? final_ai_output) {
         updateStreamingMsgView(
             canceled: true, final_ai_output: final_ai_output);
-      });
+      }
+
+      if (now) {
+        llm.cancel_advance_stream();
+        onComplete(null);
+      } else {
+        await llm.cancel_advance_stream(onComplete: onComplete);
+      }
     }
   }
 
@@ -2458,7 +2752,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     bool actionsEnabled = _initialized && !_msg_streaming;
     const Color disabledColor = Colors.white60;
-    Color iconColor = actionsEnabled ? Colors.white : disabledColor;
+    Color iconEnabledColor = Colors.white;
+    Color iconColor = actionsEnabled ? iconEnabledColor : disabledColor;
 
     Color warningColor = Theme.of(context).colorScheme.error!;
     bool tokenOverload = (llm.tokens_used + _input_tokens) >= llm.n_ctx;
@@ -2471,6 +2766,25 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     var hintColor = Theme.of(context).hintColor;
     Color headerTextColor = textColor!;
 
+    var now = DateTime.now();
+
+    var showMsgProgress = false;
+    var aiIsThinking = false;
+
+    if (_msg_streaming &&
+        ((_prompt_processing_completed == null) ||
+            (_prompt_processing_completed != null &&
+                now.difference(_prompt_processing_completed!).inMilliseconds <
+                    500))) {
+      showMsgProgress = true;
+    }
+
+    if (_msg_streaming && _prompt_processing_completed == null) {
+      aiIsThinking = true;
+    }
+
+    // print("aiIsThinking: $aiIsThinking, showMsgProgress: $showMsgProgress");
+
     if (app_setup_done()) {
       initAIifNotAlready();
       mainWidget = Expanded(
@@ -2480,18 +2794,38 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     onTap: () => fct(),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 10),
-                      child: Column(children: [
+                          horizontal: 4, vertical: 10),
+                      child: Stack(children: [
                         Icon(
-                          size: 32,
+                          size: 40,
                           Icons.send,
                           color: _current_msg_input.isNotEmpty
                               ? activeColor
                               : hintColor,
                         ),
-                        if (_input_tokens > 0)
-                          Text("$_input_tokens",
-                              style: TextStyle(color: hintColor))
+                        if (_input_tokens > 0) ...[
+                          Transform.translate(
+                              offset: const Offset(1.0, -20.0),
+                              child: SizedBox(
+                                width: 40,
+                                child: Center(
+                                  child: IntrinsicWidth(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 1.0, horizontal: 2.0),
+                                      alignment: AlignmentDirectional.center,
+                                      decoration: BoxDecoration(
+                                        color: activeColor,
+                                        borderRadius: const BorderRadius.all(
+                                            Radius.circular(10.0)),
+                                      ),
+                                      child: Text("$_input_tokens",
+                                          style: TextStyle(color: hintColor)),
+                                    ),
+                                  ),
+                                ),
+                              ))
+                        ]
                       ]),
                     ),
                   ),
@@ -2535,7 +2869,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                   _update_token_counter(upd);
                 });
               }),
-          messageListOptions: MessageListOptions(),
+          messageListOptions: MessageListOptions(
+              // showTypingPlaceholder: const SizedBox(height: 64),
+              typingBuilder: (ChatUser user) => ProgressTypingBuilder(
+                  user: user,
+                  text: aiIsThinking ? 'is thinking' : 'is typing',
+                  pkey: "prompt_processing_${llm.modelpath}",
+                  workAmount: _prompt_processing_ntokens,
+                  showProgress: showMsgProgress,
+                  progress: (_incomplete_msg?.isNotEmpty ?? false)
+                      ? 1.0
+                      : _prompt_processing_progress)),
           messageOptions: MessageOptions(
               containerColor: bgColor!,
               currentUserContainerColor: bgColor!,
@@ -2564,17 +2908,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         mainWidget = Stack(
           children: <Widget>[
             // Your existing widget tree goes here
-            const Center(
+            Center(
                 child: Padding(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 200, vertical: 200),
+                    padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
                     child: SizedBox(
                         width: 512,
-                        child: GFLoader(
-                          type: GFLoaderType.ios,
-                          size: 50,
-                          loaderstrokeWidth: 4.0,
-                        )))),
+                        child: LinearProgressIndicator(
+                            value: llm_load_progress,
+                            minHeight: 6.0,
+                            borderRadius: BorderRadius.circular(3.0),
+                            backgroundColor: Colors.white70,
+                            color: activeColor)))),
             Container(
               color: Colors.black.withOpacity(0.5),
             ),
@@ -2590,8 +2934,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       drawer: _buildDrawer(context),
       appBar: AppBar(
           leading: IconButton(
+            color: iconEnabledColor,
             padding: actionIconPadding,
-            icon: const Icon(Icons.menu,
+            icon: Icon(Icons.menu,
+                color: iconEnabledColor,
                 size: actionIconSize), // change this size and style
             onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
@@ -2619,7 +2965,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                 icon: Icon(
                   size: actionIconSize,
                   Icons.stop,
-                  color: headerTextColor,
+                  color: iconEnabledColor,
                 ),
                 onPressed: stop_llm_generation,
               ),
@@ -2646,6 +2992,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             PopupMenuButton<String>(
               padding: actionIconPadding,
               iconSize: actionIconSize,
+              color: iconEnabledColor,
               onSelected: (item) {
                 switch (item) {
                   case "model_switch":
@@ -2714,7 +3061,9 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
   final ChatManager _chatManager = ChatManager();
   Timer? _debounceTimer;
+  String? _prevQuery;
   Future<List<(Chat, List<Message>)>>? _searchResults;
+  bool _resValid = false;
 
   @override
   void initState() {
@@ -2734,14 +3083,19 @@ class _SearchPageState extends State<SearchPage> {
       _debounceTimer!.cancel();
     }
     _debounceTimer = Timer(Duration(milliseconds: SEARCH_THROTTLE), () async {
-      if (_searchController.text.isNotEmpty) {
+      if (_searchController.text.isNotEmpty &&
+          (!((_prevQuery != null) && _searchController.text == _prevQuery))) {
+        var res = _chatManager.searchMessagesGrouped(_searchController.text,
+            prefixQuery: true);
         setState(() {
-          _searchResults = _chatManager
-              .searchMessagesGrouped(_searchController.text, prefixQuery: true);
+          _prevQuery = _searchController.text;
+          _searchResults = res;
+          _resValid = true;
         });
       } else {
         setState(() {
           _searchResults = null;
+          _resValid = false;
         });
       }
     });
@@ -2758,7 +3112,8 @@ class _SearchPageState extends State<SearchPage> {
           return Text('Error: ${snapshot.error}');
         } else {
           return Padding(
-              padding: EdgeInsets.symmetric(vertical: 2.0, horizontal: 0.0),
+              padding:
+                  const EdgeInsets.symmetric(vertical: 2.0, horizontal: 0.0),
               child: ListView.builder(
                 itemCount: snapshot?.data?.length ?? 0,
                 itemBuilder: (context, index) {
@@ -3405,7 +3760,7 @@ class HandheldHelper extends StatelessWidget {
       appBarTheme: AppBarTheme(
           backgroundColor:
               isDarkTheme ? Colors.grey.shade800 : Colors.lightBlue.shade600,
-          foregroundColor: isDarkTheme ? Colors.white70 : Colors.black,
+          foregroundColor: isDarkTheme ? Colors.white70 : Colors.white,
           iconTheme: IconThemeData(
               color: isDarkTheme ? Colors.white : Colors.black54)),
       // Additional custom color fields
@@ -3415,10 +3770,11 @@ class HandheldHelper extends StatelessWidget {
     return baseTheme.copyWith(
       extensions: <ThemeExtension<dynamic>>[
         const ExtendedThemeData(
-          warning: const Color.fromRGBO(210, 170, 98, 1.0),
-          info: const Color.fromRGBO(141, 134, 124, 1.0),
-          chatMsgWarningFontSize: 14,
-        ),
+            warning: Color.fromRGBO(210, 170, 98, 1.0),
+            info: Color.fromRGBO(141, 134, 124, 1.0),
+            chatMsgWarningFontSize: 14,
+            codeBackgroundColor: Colors.white30,
+            codeTextColor: Colors.black),
       ],
     );
   }
@@ -3440,7 +3796,7 @@ class HandheldHelper extends StatelessWidget {
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
 
-      theme: getAppTheme(context, true),
+      theme: getAppTheme(context, false),
 
       //theme: ThemeData(
       //   colorScheme: colorScheme,

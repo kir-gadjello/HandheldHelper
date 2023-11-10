@@ -16,6 +16,8 @@ class DefaultTypingBuilder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    var hintColor = Theme.of(context).hintColor;
+
     return Padding(
       padding: const EdgeInsets.only(left: 15, top: 25),
       child: Row(
@@ -27,14 +29,18 @@ class DefaultTypingBuilder extends StatelessWidget {
           ),
           Text(
             user.getFullName(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
+              color: hintColor,
             ),
           ),
           Text(
             ' $text',
-            style: const TextStyle(fontSize: 12),
+            style: TextStyle(
+              fontSize: 12,
+              color: hintColor,
+            ),
           ),
         ],
       ),

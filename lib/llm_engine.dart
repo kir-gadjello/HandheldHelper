@@ -108,6 +108,7 @@ class SUpdate {
 class AIChatPollResult {
   bool success = false;
   bool finished = false;
+  double progress = 0.0;
   List<SUpdate> completion_updates = [];
 
   AIChatPollResult();
@@ -115,6 +116,7 @@ class AIChatPollResult {
   AIChatPollResult.fromJson(Map<String, dynamic> data) {
     success = data['success'] ?? false;
     finished = data['finished'] ?? false;
+    progress = data['prompt_processing_progress'] ?? 0.0;
     if (data['completion_updates'] != null) {
       completion_updates = List<SUpdate>.from(
           data['completion_updates'].map((update) => SUpdate.fromJson(update)));
@@ -243,9 +245,10 @@ class LLMEngine {
   bool init_in_progress = false;
   bool postpone_init = false;
   bool init_postponed = false;
+  double loading_progress = 0.0;
   bool streaming = false;
   String stream_msg_acc = "";
-  Function? onInitDone = null;
+  VoidCallback? onInitDone = null;
   int tokens_used = 0;
   int n_ctx = 0;
 
@@ -307,9 +310,16 @@ class LLMEngine {
         llama_init_json: llama_init_json);
   }
 
-  void poll_init() {
+  void poll_init({VoidCallback? Function(double)? onProgressUpdate}) {
     var sysinfo = Map<String, dynamic>.from(
         jsonDecode(rpc.poll_system_status().cast<Utf8>().toDartString()));
+
+    if (sysinfo['loading_progress'] is double) {
+      loading_progress = sysinfo['loading_progress'];
+      if (onProgressUpdate != null) {
+        onProgressUpdate(loading_progress);
+      }
+    }
 
     if (sysinfo['init_success'] == 1) {
       initialized = true;
@@ -321,15 +331,15 @@ class LLMEngine {
     print("LOG sysinfo: $sysinfo");
   }
 
-  // void _sync_token_count() {
-  //   if (initialized) {
-  //     var tok = tokenize(format_chatml(msgs));
-  //     print(tok.toString());
-  //     if (tok.success) {
-  //       tokens_used = tok.length;
-  //     }
-  //   }
-  // }
+  int? sync_token_count() {
+    if (initialized) {
+      var tok = tokenize(format_chatml(msgs));
+      if (tok.success) {
+        tokens_used = tok.length;
+        return tokens_used;
+      }
+    }
+  }
 
   int measure_tokens(String s) {
     if (s.isEmpty) {
@@ -348,7 +358,8 @@ class LLMEngine {
       {required String modelpath,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
-      onInitDone}) {
+      VoidCallback? onInitDone,
+      VoidCallback? Function(double)? onProgressUpdate}) {
     if (state == LLMEngineState.INITIALIZED_SUCCESS) {
       teardown();
     }
@@ -388,7 +399,7 @@ class LLMEngine {
         rpc.init_async(jsonEncode(init_json).toNativeUtf8().cast<ffi.Char>());
 
         Timer.periodic(Duration(milliseconds: 250), (timer) {
-          poll_init();
+          poll_init(onProgressUpdate: onProgressUpdate);
           if (initialized) {
             init_in_progress = false;
             state = LLMEngineState.INITIALIZED_SUCCESS;
@@ -585,7 +596,7 @@ class LLMEngine {
           .cast<Utf8>()
           .toDartString();
 
-      // if (__DEBUG) print("RESPONSE: $api_resp");
+      if (__DEBUG) print("RESPONSE: $api_resp");
 
       // TODO: backoff if busy
       // bool success = jsonDecode(api_resp)["success"] as bool;

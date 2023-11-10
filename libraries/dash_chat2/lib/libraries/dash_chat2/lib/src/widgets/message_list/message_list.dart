@@ -127,6 +127,10 @@ class MessageListState extends State<MessageList> {
                   }
                   return DefaultTypingBuilder(user: user);
                 }).toList(),
+              if (widget.typingUsers != null &&
+                  widget.typingUsers!.isEmpty &&
+                  widget.messageListOptions.showTypingPlaceholder != null)
+                widget.messageListOptions.showTypingPlaceholder!,
               if (widget.messageListOptions.showFooterBeforeQuickReplies &&
                   widget.messageListOptions.chatFooterBuilder != null)
                 widget.messageListOptions.chatFooterBuilder!,

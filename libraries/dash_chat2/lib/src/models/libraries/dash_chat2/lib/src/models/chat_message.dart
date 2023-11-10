@@ -11,6 +11,7 @@ class ChatMessage {
     this.medias,
     this.quickReplies,
     this.customProperties,
+    this.trailingBuilder,
     this.mentions,
     this.status = MessageStatus.none,
     this.replyTo,
@@ -79,6 +80,8 @@ class ChatMessage {
 
   Color? customBackgroundColor;
   Color? customTextColor;
+
+  Widget Function(BuildContext)? trailingBuilder;
 
   /// Convert a ChatMessage into a json
   Map<String, dynamic> toJson() {

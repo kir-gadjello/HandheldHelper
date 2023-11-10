@@ -4,7 +4,6 @@ cd ../llama.cpp;
 rm -rf build;
 mkdir build;
 cd build;
-rm -rf .;
 cmake .. -DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1
 cmake --build . --config Release --target rpcserver server_oaicompat;
 cd ..;

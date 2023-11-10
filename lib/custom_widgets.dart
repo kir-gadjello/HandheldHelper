@@ -17,6 +17,8 @@ Widget MdViewer(
     MessageOptions messageOptions,
     Color? customBackgroundColor,
     Color? customTextColor) {
+  var extThemeData = Theme.of(context).extension<ExtendedThemeData>()!;
+
   var bgColor = Theme.of(context).listTileTheme.tileColor;
   var textColor = Theme.of(context).listTileTheme.textColor;
 
@@ -40,7 +42,7 @@ Widget MdViewer(
     highlightBuilder: (text, language, infoString) {
       final prism = Prism(
         mouseCursor: SystemMouseCursors.text,
-        style: Theme.of(context).brightness == Brightness.dark
+        style: Theme.of(context).scaffoldBackgroundColor == Colors.black
             ? const PrismStyle.dark()
             : const PrismStyle(),
       );
@@ -56,18 +58,18 @@ Widget MdViewer(
     //   ExampleBuilder(),
     // ],
     styleSheet: MarkdownStyle(
-      textStyle: TextStyle(color: textColor, backgroundColor: bgColor),
+      // textStyle: TextStyle(color: textColor, backgroundColor: bgColor),
       listItemMarkerTrailingSpace: 12,
       // (isOwnMessage ? messageOptions.currentUserTextColor(context) : messageOptions.textColor
       // codeSpan: TextStyle(color: Color.black,
       //   decoration: TextDecoration.none,
       //   fontWeight: FontWeight.w600,
       // ),
-      codeBlock: const TextStyle(
-        fontSize: 14,
-        letterSpacing: 1.0,
-        fontFamily: 'RobotoMono',
-      ),
+      // codeBlock: TextStyle(
+      //     fontSize: 14,
+      //     letterSpacing: 1.0,
+      //     fontFamily: 'RobotoMono',
+      //     backgroundColor: extThemeData.codeBackgroundColor!),
     ),
   );
 }
