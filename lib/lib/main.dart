@@ -8,6 +8,7 @@ import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
 import 'llm_engine.dart';
@@ -17,19 +18,29 @@ import 'package:flutter_fast_forms/flutter_fast_forms.dart';
 import 'package:getwidget/getwidget.dart';
 import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:flutter_color/flutter_color.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'util.dart';
+import 'commit_hash.dart';
 
 const APP_TITLE_SHORT = "HHH";
 const APP_TITLE_FULL = "HandHeld Helper Beta";
 const APP_REPO_LINK = "https://github.com/kir-gadjello/handheld-helper";
-const APP_VERSION = "V0.1β-"
-final APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
+final String APP_VERSION = "βv0.1.0-${APP_COMMIT_HASH.substring(0, 8)}";
+final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
 const APPBAR_WIDTH = 220.0;
 
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1000 : 500;
+
+void launchURL(String url) async {
+  if (await canLaunch(url)) {
+    await launch(url);
+  } else {
+    throw 'Could not launch $url';
+  }
+}
 
 Future<void> requestStoragePermission() async {
   var status = await Permission.manageExternalStorage.request();
@@ -3584,65 +3595,99 @@ Drawer _buildDrawer(BuildContext context) {
   final navigate = navigationProvider?.navigate;
 
   var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+  var lighterBgColor = bgColor!.lighter(10);
   var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
   var textColor = Theme.of(context).listTileTheme.textColor;
+  var hintColor = Theme.of(context).hintColor;
 
   return Drawer(
       width: APPBAR_WIDTH,
       shape: isMobile()
           ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
           : const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      child: Column(children: [
-        Container(
+      child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height,
+          ),
           color: bgColor,
-          child: ListView(
-            children: _app_pages.map((page) {
-              final selected = page == global_current_page;
-              return Material(
-                  // Wrap ListTile with Material
-                  color: selected ? bgColor!.lighter(10) : bgColor,
-                  child: ListTile(
-                    tileColor: selected ? bgColor!.lighter(10) : bgColor,
-                    // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
-                    title: Text(getPageName(page, capitalize: true),
-                        style: TextStyle(
-                            color: selected ? fgColor : textColor,
-                            fontSize: 28)),
-                    onTap: () {
-                      if (navigate != null) {
-                        navigate(page);
-                      }
-                      Navigator.pop(context); // Close the drawer
-                    },
-                  ));
-            }).toList(),
-          ),
-        ),
-        const Container(
-          child: DrawerHeader(
-            child: Column(
+          // This column breaks rendering with exceptions
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(APP_TITLE_SHORT, style: TextStyle(fontSize: 24)),
-                ListTile(
-                  leading: Icon(Icons.info),
-                  title: Text('Version 1.0.0'),
-                  onTap: () {},
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: _app_pages.map((page) {
+                    final selected = page == global_current_page;
+                    return Material(
+                        child: ListTile(
+                      tileColor: selected ? lighterBgColor : bgColor,
+                      title: Text(getPageName(page, capitalize: true),
+                          style: TextStyle(
+                              color: selected ? fgColor : textColor,
+                              fontSize: 28)),
+                      onTap: () {
+                        if (navigate != null) {
+                          navigate(page);
+                        }
+                        Navigator.pop(context); // Close the drawer
+                      },
+                    ));
+                  }).toList(),
                 ),
-                ListTile(
-                  leading: Icon(Icons.code),
-                  title: Text('GitHub Repository'),
-                  onTap: () {
-                    launchURL('https://github.com/your-username/your-repo');
-                  },
-                ),
-              ],
-            ),
-            decoration: BoxDecoration(
-              color: Colors.blue,
-            ),
-          ),
-        ),
-      ]));
+                Padding(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 3.0, horizontal: 2.0),
+                    child: Container(
+                        decoration: BoxDecoration(
+                            color: lighterBgColor,
+                            borderRadius: BorderRadius.circular(8.0)),
+                        child: Column(children: [
+                          const SizedBox(height: 3.0),
+                          Text(APP_TITLE_FULL,
+                              style: TextStyle(color: fgColor, fontSize: 19)),
+                          const SizedBox(height: 6.0),
+                          Row(children: [
+                            Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 0.0, horizontal: 6.0),
+                                child: Icon(Icons.info, color: hintColor)),
+                            Text(APP_VERSION,
+                                style:
+                                    TextStyle(color: hintColor, fontSize: 14))
+                          ]),
+                          const SizedBox(height: 6.0),
+                          Row(children: [
+                            Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 0.0, horizontal: 6.0),
+                                child: Icon(
+                                  Icons.code_rounded,
+                                  color: hintColor,
+                                )),
+                            RichText(
+                              text: TextSpan(
+                                style:
+                                    TextStyle(color: hintColor, fontSize: 12),
+                                children: <TextSpan>[
+                                  TextSpan(
+                                    text: APP_REPO_LINK.replaceFirst(
+                                        "https://github.com/", ""),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = () {
+                                        // Define what happens when the text is tapped here
+                                        launchURL(APP_REPO_LINK);
+                                      },
+                                  ),
+                                ],
+                              ),
+                            )
+                          ]),
+                          const SizedBox(height: 6.0),
+                        ])))
+              ])));
+  // onTap: () {
+  //   launchURL(APP_REPO_LINK);
+  // },
 }
 
 class NavigationProvider extends InheritedWidget {
