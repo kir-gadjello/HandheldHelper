@@ -19,7 +19,12 @@ import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:flutter_color/flutter_color.dart';
 import 'util.dart';
 
-final APP_TITLE = isMobile() ? "HHH" : "HandHeld Helper";
+const APP_TITLE_SHORT = "HHH";
+const APP_TITLE_FULL = "HandHeld Helper Beta";
+const APP_REPO_LINK = "https://github.com/kir-gadjello/handheld-helper";
+const APP_VERSION = "V0.1β-"
+final APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
+const APPBAR_WIDTH = 220.0;
 
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
@@ -2029,8 +2034,6 @@ class ProgressTypingBuilder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    print("ProgressTypingBuilder workAmount=$workAmount");
-
     var bgColor = Theme.of(context).primaryColorDark;
     var textColor = Theme.of(context).listTileTheme.textColor;
 
@@ -2447,6 +2450,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       var poll_result = llm.poll_advance_stream();
       finished = poll_result.finished;
       _prompt_processing_progress = poll_result.progress;
+
       if (_prompt_processing_completed == null &&
           (_prompt_processing_progress - 1.0).abs() < 0.01) {
         var now = DateTime.now();
@@ -2456,16 +2460,16 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         } catch (e) {}
         _prompt_processing_completed = now;
       }
-      // print("PROMPT PROCESSING PROGRESS: $_prompt_processing_progress");
 
       if (finished) {
         completedMsg = llm.msgs.last;
         if (completedMsg.role == "assistant") {
           chatManager.addMessageToChat(
               current.uuid, completedMsg.content, "AI");
-          await metaKV.deleteMetadata("_msg_stream_in_progress_");
+          await clearPersistedState(onlyStreaming: true);
         } else {
           print("ERROR: COULD NOT GENERATE STREAMING MESSAGE");
+          await clearPersistedState(onlyStreaming: true);
           // TODO handle this hypo case
         }
       } else {
@@ -2474,7 +2478,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       }
     } else {
       finished = true;
-      // llm.msgs.last;
+
       if (final_ai_output != null) {
         completedMsg = AIChatMessage("assistant", final_ai_output!);
         chatManager.addMessageToChat(current.uuid, final_ai_output!, "AI",
@@ -2761,10 +2765,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     Widget mainWidget;
 
     var activeColor = Theme.of(context).primaryColor;
+    Color lighterActiveColor = activeColor.lighter(50);
     var bgColor = Theme.of(context).listTileTheme.tileColor;
+    var aiMsgColor = Theme.of(context).listTileTheme.tileColor;
+    var userMsgColor = Theme.of(context).listTileTheme.selectedTileColor;
     var textColor = Theme.of(context).listTileTheme.textColor;
     var hintColor = Theme.of(context).hintColor;
-    Color headerTextColor = textColor!;
+    Color headerTextColor = Theme.of(context).appBarTheme.foregroundColor!;
 
     var now = DateTime.now();
 
@@ -2820,7 +2827,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                                             Radius.circular(10.0)),
                                       ),
                                       child: Text("$_input_tokens",
-                                          style: TextStyle(color: hintColor)),
+                                          style: TextStyle(
+                                              fontSize: 15,
+                                              color: headerTextColor)),
                                     ),
                                   ),
                                 ),
@@ -2881,8 +2890,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       ? 1.0
                       : _prompt_processing_progress)),
           messageOptions: MessageOptions(
-              containerColor: bgColor!,
-              currentUserContainerColor: bgColor!,
+              containerColor: aiMsgColor!,
+              currentUserContainerColor: userMsgColor!,
               textColor: textColor!,
               currentUserTextColor: textColor!,
               messageTextBuilder: customMessageTextBuilder,
@@ -2913,12 +2922,23 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
                     child: SizedBox(
                         width: 512,
-                        child: LinearProgressIndicator(
-                            value: llm_load_progress,
-                            minHeight: 6.0,
-                            borderRadius: BorderRadius.circular(3.0),
-                            backgroundColor: Colors.white70,
-                            color: activeColor)))),
+                        child: Container(
+                            padding: EdgeInsets.all(3.0),
+                            decoration: BoxDecoration(
+                              color: bgColor!,
+                              border: Border.all(
+                                color: lighterActiveColor,
+                                width:
+                                    1.0, // Adjust the width of the border here
+                              ),
+                              borderRadius: BorderRadius.circular(
+                                  5.0), // Adjust the radius of the border here
+                            ),
+                            child: LinearProgressIndicator(
+                                value: llm_load_progress,
+                                minHeight: 6.0,
+                                borderRadius: BorderRadius.circular(3.0),
+                                color: activeColor))))),
             Container(
               color: Colors.black.withOpacity(0.5),
             ),
@@ -2945,7 +2965,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           title: Row(children: [
             if (!isMobile())
               Expanded(
-                  child: Text("HHH",
+                  child: Text(APP_TITLE_SHORT,
                       style: TextStyle(
                           color: headerTextColor,
                           fontStyle: FontStyle.italic,
@@ -3521,16 +3541,18 @@ class UnderConstructionWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
     var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
-    var fgColor = Theme.of(context).colorScheme.primary!;
+    var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
+    var bgColor2 = Colors.black;
 
     return Scaffold(
         drawer: _buildDrawer(context),
         appBar: AppBar(backgroundColor: bgColor),
         body: Container(
             width: screenWidth,
+            color: bgColor2,
             child: Card(
               color: bgColor,
-              margin: EdgeInsets.all(20.0),
+              margin: const EdgeInsets.all(20.0),
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
@@ -3538,10 +3560,10 @@ class UnderConstructionWidget extends StatelessWidget {
                   children: <Widget>[
                     Icon(
                       Icons.warning_rounded,
-                      size: 50,
+                      size: 80,
                       color: fgColor,
                     ),
-                    SizedBox(height: 20),
+                    const SizedBox(height: 20),
                     Text(
                       message,
                       style: TextStyle(
@@ -3563,36 +3585,64 @@ Drawer _buildDrawer(BuildContext context) {
 
   var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
   var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
+  var textColor = Theme.of(context).listTileTheme.textColor;
 
   return Drawer(
+      width: APPBAR_WIDTH,
       shape: isMobile()
           ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
           : const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      child: Container(
-        color: bgColor,
-        child: ListView(
-          children: _app_pages.map((page) {
-            final selected = page == global_current_page;
-            final textStyle = TextStyle(
-                color: selected
-                    ? fgColor
-                    : Theme.of(context).colorScheme.inversePrimary,
-                fontSize: 28);
-            return ListTile(
-              selected: selected,
-              titleTextStyle: textStyle,
-              // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
-              title: Text(getPageName(page, capitalize: true)),
-              onTap: () {
-                if (navigate != null) {
-                  navigate(page);
-                }
-                Navigator.pop(context); // Close the drawer
-              },
-            );
-          }).toList(),
+      child: Column(children: [
+        Container(
+          color: bgColor,
+          child: ListView(
+            children: _app_pages.map((page) {
+              final selected = page == global_current_page;
+              return Material(
+                  // Wrap ListTile with Material
+                  color: selected ? bgColor!.lighter(10) : bgColor,
+                  child: ListTile(
+                    tileColor: selected ? bgColor!.lighter(10) : bgColor,
+                    // tileColor: selected ? Colors.lightBlueAccent : Colors.white,
+                    title: Text(getPageName(page, capitalize: true),
+                        style: TextStyle(
+                            color: selected ? fgColor : textColor,
+                            fontSize: 28)),
+                    onTap: () {
+                      if (navigate != null) {
+                        navigate(page);
+                      }
+                      Navigator.pop(context); // Close the drawer
+                    },
+                  ));
+            }).toList(),
+          ),
         ),
-      ));
+        const Container(
+          child: DrawerHeader(
+            child: Column(
+              children: [
+                Text(APP_TITLE_SHORT, style: TextStyle(fontSize: 24)),
+                ListTile(
+                  leading: Icon(Icons.info),
+                  title: Text('Version 1.0.0'),
+                  onTap: () {},
+                ),
+                ListTile(
+                  leading: Icon(Icons.code),
+                  title: Text('GitHub Repository'),
+                  onTap: () {
+                    launchURL('https://github.com/your-username/your-repo');
+                  },
+                ),
+              ],
+            ),
+            decoration: BoxDecoration(
+              color: Colors.blue,
+            ),
+          ),
+        ),
+      ]));
 }
 
 class NavigationProvider extends InheritedWidget {
@@ -3742,8 +3792,8 @@ class HandheldHelper extends StatelessWidget {
               background: Colors.black,
               error: Colors.purple)
           : ColorScheme.fromSeed(
-              seedColor: Colors.cyan.shade500,
-              primary: Colors.cyan.shade100,
+              seedColor: Colors.cyan.shade400,
+              primary: Colors.cyan.shade400,
               background: Colors.white,
               error: Colors.purple),
       scaffoldBackgroundColor: isDarkTheme ? Colors.black : Colors.white,
@@ -3755,6 +3805,9 @@ class HandheldHelper extends StatelessWidget {
       listTileTheme: ListTileThemeData(
           iconColor: isDarkTheme ? Colors.orange : Colors.purple,
           textColor: isDarkTheme ? Colors.white : Colors.black,
+          // user msg color
+          selectedTileColor:
+              isDarkTheme ? Colors.purple.shade50 : Colors.purple.shade50,
           tileColor:
               isDarkTheme ? Colors.grey.shade900 : Colors.lightBlue.shade50),
       appBarTheme: AppBarTheme(

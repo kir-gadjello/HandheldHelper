@@ -216,9 +216,14 @@ class MessageListState extends State<MessageList> {
     }
   }
 
-  /// Sroll listener to trigger different actions:
+  /// Scroll listener to trigger different actions:
   /// show scroll-to-bottom btn and LoadEarlier behaviour
   Future<void> _onScroll() async {
+    if (scrollController.position.maxScrollExtent == 0) {
+      hideScrollToBottom();
+      return;
+    }
+
     bool topReached =
         scrollController.offset >= scrollController.position.maxScrollExtent &&
             !scrollController.position.outOfRange;
@@ -236,7 +241,11 @@ class MessageListState extends State<MessageList> {
     } else if (scrollController.offset > 200) {
       showScrollToBottom();
     } else {
-      hideScrollToBottom();
+      if (scrollController.position.maxScrollExtent > 0) {
+        showScrollToBottom();
+      } else {
+        hideScrollToBottom();
+      }
     }
   }
 
