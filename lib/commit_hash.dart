@@ -1,1 +1,1 @@
-const String APP_COMMIT_HASH = 'afc8051d23f3ab4c10fdb75f84b094a4b6f4c48e';
+const String APP_COMMIT_HASH = '721d6b7b61109f44c7ecab9c6d3e262285cbbf19';
