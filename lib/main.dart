@@ -2259,9 +2259,16 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   int? sync_messages_to_llm() {
-    llm.msgs = _messages
-        .map((m) => AIChatMessage(m.user.getFullName(), m.text))
-        .toList();
+    llm.msgs = _messages.map((m) {
+      if (m.customProperties != null &&
+          (m.customProperties
+                  ?.containsValue("_is_system_message_with_prompt") ??
+              false)) {
+        return AIChatMessage(m.user.getFullName(),
+            m.customProperties!["_is_system_message_with_prompt"] as String);
+      }
+      return AIChatMessage(m.user.getFullName(), m.text);
+    }).toList();
     return llm.sync_token_count();
   }
 
@@ -2373,13 +2380,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  Future<void> create_new_chat() async {
+  Future<void> create_new_chat({system_prompt = hermes_sysmsg}) async {
     var firstMsg = ChatMessage(
-      text:
-          "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', hermes_sysmsg)}__",
-      user: user_SYSTEM,
-      createdAt: DateTime.now(),
-    );
+        text:
+            "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', system_prompt)}__",
+        user: user_SYSTEM,
+        createdAt: DateTime.now(),
+        customProperties: {"_is_system_message_with_prompt": system_prompt});
 
     _current_chat = await chatManager.createChat(
         firstMessageText: firstMsg.text, firstMessageUsername: "SYSTEM");
