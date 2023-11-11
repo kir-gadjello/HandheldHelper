@@ -2,6 +2,7 @@
 // import 'dart:convert';
 // import 'dart:async';
 import 'dart:io';
+import 'package:intl/intl.dart';
 
 bool isMobile() => Platform.isAndroid;
 bool isDevelopment() =>
@@ -42,4 +43,29 @@ Future<int> checkFileSize(String path) async {
   }
 
   return -1;
+}
+
+String humanReadableDate(DateTime date) {
+  final dt = date;
+  final now = DateTime.now();
+  final firstDayOfWeek =
+      DateTime(now.year, now.month, now.day - now.weekday + 1);
+  final isInCurrentWeek = dt.isAfter(firstDayOfWeek) &&
+      dt.isBefore(firstDayOfWeek.add(Duration(days: 7)));
+
+  String heading;
+
+  if (dt.difference(now).inDays == 0) {
+    heading = "Today, ${DateFormat('HH:mm:ss').format(dt)}";
+  } else if (dt.difference(now.subtract(Duration(days: 1))).inDays == 0) {
+    heading = "Yesterday, ${DateFormat('HH:mm:ss').format(dt)}";
+  } else if (isInCurrentWeek) {
+    final dateFormat = DateFormat('EEEE, HH:mm:ss');
+    heading = dateFormat.format(dt);
+  } else {
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm:ss');
+    heading = dateFormat.format(dt);
+  }
+
+  return heading;
 }

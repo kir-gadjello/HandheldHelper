@@ -368,9 +368,12 @@ class Chat {
     };
   }
 
-  String getHeading() => (title == null)
-      ? "Chat from ${DateTime.fromMillisecondsSinceEpoch(date * 1000)}"
-      : title!;
+  String getHeading() {
+    if (title == null) {
+      return "Chat from ${humanReadableDate(DateTime.fromMillisecondsSinceEpoch(date * 1000))}";
+    }
+    return title!;
+  }
 }
 
 Future<String> resolve_db_dir() async {

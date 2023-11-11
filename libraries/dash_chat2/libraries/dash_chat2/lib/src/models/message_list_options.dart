@@ -2,20 +2,22 @@ part of dash_chat_2;
 
 /// {@category Customization}
 class MessageListOptions {
-  const MessageListOptions({
-    this.showDateSeparator = true,
-    this.dateSeparatorFormat,
-    this.dateSeparatorBuilder,
-    this.separatorFrequency = SeparatorFrequency.days,
-    this.scrollController,
-    this.chatFooterBuilder,
-    this.showFooterBeforeQuickReplies = false,
-    this.loadEarlierBuilder,
-    this.onLoadEarlier,
-    this.typingBuilder,
-    this.scrollPhysics,
-    this.showTypingPlaceholder,
-  });
+  const MessageListOptions(
+      {this.showDateSeparator = true,
+      this.dateSeparatorFormat,
+      this.dateSeparatorBuilder,
+      this.separatorFrequency = SeparatorFrequency.days,
+      this.scrollController,
+      this.chatFooterBuilder,
+      this.showFooterBeforeQuickReplies = false,
+      this.loadEarlierBuilder,
+      this.onLoadEarlier,
+      this.typingBuilder,
+      this.scrollPhysics,
+      this.showTypingPlaceholder,
+      this.fullWidthRow = false});
+
+  final bool fullWidthRow;
 
   /// If you want to who a date separator between messages of different dates
   final bool showDateSeparator;

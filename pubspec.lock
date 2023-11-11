@@ -192,6 +192,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.3.3"
+  duration:
+    dependency: "direct main"
+    description:
+      name: duration
+      sha256: "0548a12d235dab185c677ef660995f23fdc06a02a2b984aa23805f6a03d82815"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.13"
   external_path:
     dependency: "direct main"
     description:
@@ -503,6 +511,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.4"
+  native_context_menu:
+    dependency: "direct main"
+    description:
+      name: native_context_menu
+      sha256: "566f13d1f55e57bc8aca3b71b157b1ff03c2cc3821f6e9d980f76233ed30c9b7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2+5"
   node_preamble:
     dependency: transitive
     description:

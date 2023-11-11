@@ -23,6 +23,7 @@ class MessageOptions {
     this.top,
     this.bottom,
     this.messageRowBuilder,
+    this.fullWidthRow = false,
     this.messageTextBuilder,
     this.parsePatterns,
     this.textBeforeMedia = true,
@@ -50,6 +51,8 @@ class MessageOptions {
 
   /// If you want to show the time under the text of each message
   final bool showTime;
+
+  final bool fullWidthRow;
 
   /// If you want to show the avatar of the current user
   final bool showCurrentUserAvatar;
@@ -147,8 +150,12 @@ class MessageOptions {
   )? messageRowBuilder;
 
   /// Builder to create own message text widget
-  final Widget Function(ChatMessage message, ChatMessage? previousMessage,
-      ChatMessage? nextMessage, bool? isOwnMessage, MessageOptions? messageOptions)? messageTextBuilder;
+  final Widget Function(
+      ChatMessage message,
+      ChatMessage? previousMessage,
+      ChatMessage? nextMessage,
+      bool? isOwnMessage,
+      MessageOptions? messageOptions)? messageTextBuilder;
 
   /// Builder to create your own media container widget
   final Widget Function(ChatMessage message, ChatMessage? previousMessage,

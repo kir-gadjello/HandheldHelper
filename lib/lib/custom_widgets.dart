@@ -10,6 +10,58 @@ import 'package:flutter/material.dart' show Icon, Icons;
 
 final USE_MARKDOWN = true;
 
+class CodeSpanBuilder extends MarkdownElementBuilder {
+  CodeSpanBuilder({
+    super.context,
+    TextStyle? textStyle,
+  }) : _textStyle = textStyle;
+
+  @override
+  final matchTypes = ['codeSpan'];
+
+  double? _lineHeight;
+  final TextStyle? _textStyle;
+
+  @override
+  TextStyle? buildTextStyle(element, defaultStyle) {
+    Color color;
+    Color backgroundColor;
+
+    if (darkMode) {
+      color = const Color(0Xffca4219);
+      backgroundColor = const Color(0Xff424242);
+    } else {
+      color = const Color(0xff8b1c1c);
+      backgroundColor = const Color(0x10000000);
+    }
+
+    final style = super
+        .buildTextStyle(element, defaultStyle)
+        ?.merge(_textStyle)
+        ?.merge(TextStyle(
+          color: color,
+          fontFamily: 'JetBrainsMono',
+          backgroundColor: backgroundColor,
+        ).merge(_textStyle));
+
+    _lineHeight = style?.height;
+
+    return style?.copyWith(height: _lineHeight);
+  }
+
+  @override
+  Widget? buildWidget(element, parent) {
+    final richText = element.children.single as RichText;
+    // The purpose of this is to make the RichText has the same line height as
+    // it should be while the line height of TextSpan has been changed to 1.
+    return renderer.createRichText(
+      richText.text as TextSpan,
+      strutStyle: StrutStyle(
+          leading: 15.0, height: _lineHeight, forceStrutHeight: false),
+    );
+  }
+}
+
 Widget MdViewer(
     String data,
     BuildContext context,
@@ -18,9 +70,15 @@ Widget MdViewer(
     Color? customBackgroundColor,
     Color? customTextColor) {
   var extThemeData = Theme.of(context).extension<ExtendedThemeData>()!;
+  var codeBackgroundColor = extThemeData.codeBackgroundColor;
+  var activeColor = Theme.of(context).primaryColor;
 
-  var bgColor = Theme.of(context).listTileTheme.tileColor;
-  var textColor = Theme.of(context).listTileTheme.textColor;
+  var bgColor = isOwnMessage
+      ? messageOptions.currentUserContainerColor(context)
+      : messageOptions.containerColor;
+  var textColor = isOwnMessage
+      ? messageOptions.currentUserTextColor(context)
+      : messageOptions.textColor;
 
   if (customBackgroundColor != null) {
     bgColor = customBackgroundColor!;
@@ -29,6 +87,24 @@ Widget MdViewer(
   if (customTextColor != null) {
     textColor = customTextColor;
   }
+
+  var codeTextColor = extThemeData.codeTextColor!;
+
+  final codeSpanStyle = TextStyle(
+    fontFamily: 'JetBrainsMono',
+    fontSize: 14,
+    height: 1.5,
+    color: codeTextColor,
+    backgroundColor: extThemeData.codeBackgroundColor!,
+    decoration: TextDecoration.none,
+    fontWeight: FontWeight.w300,
+  );
+
+  const codeBlockStyle = TextStyle(
+      fontSize: 14,
+      height: 1.5,
+      fontFamily: 'JetBrainsMono',
+      backgroundColor: Colors.transparent);
 
   return MarkdownViewer(
     data,
@@ -40,37 +116,37 @@ Widget MdViewer(
     enableKbd: false,
     // syntaxExtensions: [ExampleSyntax()],
     highlightBuilder: (text, language, infoString) {
+      final lang = language ?? 'plain';
       final prism = Prism(
         mouseCursor: SystemMouseCursors.text,
-        style: Theme.of(context).scaffoldBackgroundColor == Colors.black
-            ? const PrismStyle.dark()
-            : const PrismStyle(),
+        style: PrismStyle.dark(),
+        // style: Theme.of(context).scaffoldBackgroundColor == Colors.black
+        //     ? const PrismStyle.dark()
+        //     : const PrismStyle(),
       );
       try {
-        return prism.render(text, language ?? 'plain');
-      } catch (e) {}
-      return [TextSpan(text: text)];
+        return prism.render(text, lang);
+      } catch (e) {
+        print("MARKDOWN ERROR: PRISMx FAILED TO RENDER FOR language=${lang}");
+      }
+      return [
+        TextSpan(text: text, style: TextStyle(backgroundColor: Colors.blueGrey))
+      ];
     },
     onTapLink: (href, title) {
       print({href, title});
     },
-    // elementBuilders: [
-    //   ExampleBuilder(),
-    // ],
+    elementBuilders: [
+      CodeSpanBuilder(textStyle: codeSpanStyle),
+    ],
+    selectable: true,
+    selectionColor: activeColor,
     styleSheet: MarkdownStyle(
-      // textStyle: TextStyle(color: textColor, backgroundColor: bgColor),
-      listItemMarkerTrailingSpace: 12,
-      // (isOwnMessage ? messageOptions.currentUserTextColor(context) : messageOptions.textColor
-      // codeSpan: TextStyle(color: Color.black,
-      //   decoration: TextDecoration.none,
-      //   fontWeight: FontWeight.w600,
-      // ),
-      // codeBlock: TextStyle(
-      //     fontSize: 14,
-      //     letterSpacing: 1.0,
-      //     fontFamily: 'RobotoMono',
-      //     backgroundColor: extThemeData.codeBackgroundColor!),
-    ),
+        textStyle:
+            TextStyle(color: textColor, height: 1.4, backgroundColor: bgColor),
+        listItemMarkerTrailingSpace: 12,
+        codeSpan: codeSpanStyle,
+        codeBlock: codeBlockStyle),
   );
 }
 

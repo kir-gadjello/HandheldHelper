@@ -28,11 +28,13 @@ const APP_REPO_LINK = "https://github.com/kir-gadjello/handheld-helper";
 final String APP_VERSION = "βv0.1.0-${APP_COMMIT_HASH.substring(0, 8)}";
 final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
 const APPBAR_WIDTH = 220.0;
+const DEFAULT_THEME_DARK = true;
+const MOBILE_DRAWER_TP = 84.0;
 
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 
-final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1000 : 500;
+final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
 void launchURL(String url) async {
   if (await canLaunch(url)) {
@@ -2047,6 +2049,7 @@ class ProgressTypingBuilder extends StatelessWidget {
   Widget build(BuildContext context) {
     var bgColor = Theme.of(context).primaryColorDark;
     var textColor = Theme.of(context).listTileTheme.textColor;
+    var lighterBgColor = Theme.of(context).colorScheme.secondary;
 
     return Padding(
       padding: const EdgeInsets.only(left: 15, top: 25),
@@ -2080,7 +2083,7 @@ class ProgressTypingBuilder extends StatelessWidget {
                         value: progress,
                         borderRadius: BorderRadius.circular(3.0),
                         backgroundColor: textColor,
-                        color: Colors.teal.shade600)))
+                        color: lighterBgColor)))
           // child: SelfCalibratingProgressBar(
           //     pkey: pkey,
           //     progress: progress,
@@ -2877,7 +2880,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               ),
               inputToolbarStyle:
                   BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
-              inputDisabled: !(_initialized ?? false),
+              inputDisabled: !(_msg_streaming || (_initialized ?? false)),
               onTextChange: (String upd) {
                 dlog("LOG onTextChange $upd");
                 _current_msg_input = upd;
@@ -2901,6 +2904,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       ? 1.0
                       : _prompt_processing_progress)),
           messageOptions: MessageOptions(
+              fullWidthRow: true, // || isMobile(),
               containerColor: aiMsgColor!,
               currentUserContainerColor: userMsgColor!,
               textColor: textColor!,
@@ -3015,7 +3019,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               disabledColor: disabledColor,
               icon: Icon(
                 size: actionIconSize,
-                Icons.restart_alt,
+                Icons.add_box_outlined,
                 color: iconColor,
               ),
               onPressed: actionsEnabled ? reset_current_chat : null,
@@ -3078,7 +3082,63 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 }
 
+RichText highlightSearchResult(
+    String text, String query, int max_out_len, Color highlight_color,
+    {bool matchCase = false, ellipsis = true, int? max_n_lines}) {
+  int queryIndex = matchCase
+      ? text.indexOf(query)
+      : text.toLowerCase().indexOf(query.toLowerCase());
+  if (queryIndex == -1) {
+    return RichText(text: TextSpan(text: text));
+  }
+
+  int start = queryIndex - max_out_len ~/ 2;
+  int end = queryIndex + query.length + max_out_len ~/ 2;
+
+  if (start < 0) {
+    start = 0;
+  }
+  if (end > text.length) {
+    end = text.length;
+  }
+
+  String before = text.substring(start, queryIndex);
+  String match = text.substring(queryIndex, queryIndex + query.length);
+  String after = text.substring(queryIndex + query.length, end);
+
+  if (max_n_lines != null) {
+    var _before = before.split('\n');
+    var _after = before.split('\n');
+
+    int before_lines = _before.length;
+    int after_lines = _after.length;
+    if (before_lines > max_n_lines) {
+      before =
+          _before.sublist(max_n_lines - before_lines, before_lines).join('\n');
+    }
+    if (after_lines > max_n_lines) {
+      after = _after.sublist(0, max_n_lines).join('\n');
+    }
+  }
+
+  return RichText(
+    text: TextSpan(
+      children: [
+        if (ellipsis && start > 0) const TextSpan(text: "..."),
+        TextSpan(text: before),
+        TextSpan(
+          text: match,
+          style: TextStyle(backgroundColor: highlight_color),
+        ),
+        TextSpan(text: after),
+        if (ellipsis && end < text.length) const TextSpan(text: "..."),
+      ],
+    ),
+  );
+}
+
 final SEARCH_THROTTLE = isMobile() ? 500 : 300;
+const SEARCH_MAX_SNIPPET_LENGTH = 500;
 
 class SearchPage extends StatefulWidget {
   Function(AppPage)? navigate;
@@ -3093,6 +3153,7 @@ class _SearchPageState extends State<SearchPage> {
   final ChatManager _chatManager = ChatManager();
   Timer? _debounceTimer;
   String? _prevQuery;
+  String? _query;
   Future<List<(Chat, List<Message>)>>? _searchResults;
   bool _resValid = false;
 
@@ -3116,6 +3177,7 @@ class _SearchPageState extends State<SearchPage> {
     _debounceTimer = Timer(Duration(milliseconds: SEARCH_THROTTLE), () async {
       if (_searchController.text.isNotEmpty &&
           (!((_prevQuery != null) && _searchController.text == _prevQuery))) {
+        _query = _searchController.text;
         var res = _chatManager.searchMessagesGrouped(_searchController.text,
             prefixQuery: true);
         setState(() {
@@ -3158,9 +3220,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildSearchResultItem(Chat chat, List<Message> messages) {
+    var highlight = Theme.of(context).colorScheme.primary;
     var bgColor = Theme.of(context).listTileTheme.tileColor!;
     var bg2Color = bgColor.lighter(30);
     var textColor = Theme.of(context).listTileTheme.textColor;
+
+    if (_query == null) {
+      return const SizedBox(height: 8);
+    }
 
     Widget msgs;
 
@@ -3170,35 +3237,50 @@ class _SearchPageState extends State<SearchPage> {
               .map((m) => Padding(
                   padding: const EdgeInsets.symmetric(
                       vertical: 2.0, horizontal: 4.0),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(2)),
-                    minVerticalPadding: 2.0,
-                    tileColor: bg2Color,
-                    textColor: textColor,
-                    contentPadding: const EdgeInsets.symmetric(
-                        vertical: 2.0, horizontal: 4.0),
-                    title: Container(child: Text(m.message)),
-                    onTap: () {
-                      // Callback with relevant chatId and messageId
-                    },
-                  )))
+                  child: Material(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      child: ListTile(
+                        tileColor: m.username == "user"
+                            ? getUserMsgColor(context)
+                            : getAIMsgColor(context),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        minVerticalPadding: 2.0,
+                        textColor: textColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 2.0, horizontal: 4.0),
+                        title: Container(
+                            child: highlightSearchResult(m.message, _query!,
+                                SEARCH_MAX_SNIPPET_LENGTH, highlight,
+                                max_n_lines: 4)),
+                        onTap: () {
+                          // Callback with relevant chatId and messageId
+                        },
+                      ))))
               .toList());
     } else {
       // msgs = Text(messages[0].message);
       msgs = ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         minVerticalPadding: 2.0,
         tileColor: bg2Color,
         textColor: textColor,
         contentPadding:
             const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
-        title: Container(child: Text(messages[0].message)),
+        title: Container(
+            child: highlightSearchResult(messages[0].message, _query!,
+                SEARCH_MAX_SNIPPET_LENGTH, highlight,
+                max_n_lines: 4)),
         onTap: () {
           // Callback with relevant chatId and messageId
         },
       );
     }
+
+    var lighterBgColor = bgColor.lighter(5);
+
+    var chatTileColor = lighterBgColor.darker(8);
 
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
@@ -3209,17 +3291,18 @@ class _SearchPageState extends State<SearchPage> {
                   maxWidth: MediaQuery.of(context).size.width * 0.33,
                 ),
           decoration: BoxDecoration(
-            // borderRadius: BorderRadius.circular(10.0),
-            border: Border.all(color: Colors.grey),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: chatTileColor, width: 2),
           ),
           child: ListTile(
-            tileColor: bgColor,
+            tileColor: chatTileColor,
             textColor: textColor,
             minVerticalPadding: 2.0,
             contentPadding:
                 const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
             subtitle: msgs,
-            title: Text(chat.getHeading()),
+            title:
+                Text(chat.getHeading(), style: const TextStyle(fontSize: 22)),
             onTap: () {
               // Callback with relevant chatId and messageId
             },
@@ -3595,7 +3678,7 @@ Drawer _buildDrawer(BuildContext context) {
   final navigate = navigationProvider?.navigate;
 
   var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
-  var lighterBgColor = bgColor!.lighter(10);
+  var lighterBgColor = Theme.of(context).colorScheme.secondary;
   var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
   var textColor = Theme.of(context).listTileTheme.textColor;
   var hintColor = Theme.of(context).hintColor;
@@ -3611,83 +3694,85 @@ Drawer _buildDrawer(BuildContext context) {
           ),
           color: bgColor,
           // This column breaks rendering with exceptions
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
+          child: Padding(
+              padding: isMobile()
+                  ? const EdgeInsets.only(top: MOBILE_DRAWER_TP)
+                  : EdgeInsets.zero,
+              child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: _app_pages.map((page) {
-                    final selected = page == global_current_page;
-                    return Material(
-                        child: ListTile(
-                      tileColor: selected ? lighterBgColor : bgColor,
-                      title: Text(getPageName(page, capitalize: true),
-                          style: TextStyle(
-                              color: selected ? fgColor : textColor,
-                              fontSize: 28)),
-                      onTap: () {
-                        if (navigate != null) {
-                          navigate(page);
-                        }
-                        Navigator.pop(context); // Close the drawer
-                      },
-                    ));
-                  }).toList(),
-                ),
-                Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 3.0, horizontal: 2.0),
-                    child: Container(
-                        decoration: BoxDecoration(
-                            color: lighterBgColor,
-                            borderRadius: BorderRadius.circular(8.0)),
-                        child: Column(children: [
-                          const SizedBox(height: 3.0),
-                          Text(APP_TITLE_FULL,
-                              style: TextStyle(color: fgColor, fontSize: 19)),
-                          const SizedBox(height: 6.0),
-                          Row(children: [
-                            Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 0.0, horizontal: 6.0),
-                                child: Icon(Icons.info, color: hintColor)),
-                            Text(APP_VERSION,
-                                style:
-                                    TextStyle(color: hintColor, fontSize: 14))
-                          ]),
-                          const SizedBox(height: 6.0),
-                          Row(children: [
-                            Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 0.0, horizontal: 6.0),
-                                child: Icon(
-                                  Icons.code_rounded,
-                                  color: hintColor,
-                                )),
-                            RichText(
-                              text: TextSpan(
-                                style:
-                                    TextStyle(color: hintColor, fontSize: 12),
-                                children: <TextSpan>[
-                                  TextSpan(
-                                    text: APP_REPO_LINK.replaceFirst(
-                                        "https://github.com/", ""),
-                                    recognizer: TapGestureRecognizer()
-                                      ..onTap = () {
-                                        // Define what happens when the text is tapped here
-                                        launchURL(APP_REPO_LINK);
-                                      },
+                  children: [
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: _app_pages.map((page) {
+                        final selected = page == global_current_page;
+                        return Material(
+                            child: ListTile(
+                          tileColor: selected ? lighterBgColor : bgColor,
+                          title: Text(getPageName(page, capitalize: true),
+                              style: TextStyle(
+                                  color: selected ? fgColor : textColor,
+                                  fontSize: 28)),
+                          onTap: () {
+                            if (navigate != null) {
+                              navigate(page);
+                            }
+                            Navigator.pop(context); // Close the drawer
+                          },
+                        ));
+                      }).toList(),
+                    ),
+                    Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 3.0, horizontal: 2.0),
+                        child: Container(
+                            decoration: BoxDecoration(
+                                color: lighterBgColor,
+                                borderRadius: BorderRadius.circular(8.0)),
+                            child: Column(children: [
+                              const SizedBox(height: 3.0),
+                              Text(APP_TITLE_FULL,
+                                  style:
+                                      TextStyle(color: fgColor, fontSize: 19)),
+                              const SizedBox(height: 6.0),
+                              Row(children: [
+                                Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 0.0, horizontal: 6.0),
+                                    child: Icon(Icons.info, color: hintColor)),
+                                Text(APP_VERSION,
+                                    style: TextStyle(
+                                        color: hintColor, fontSize: 14))
+                              ]),
+                              const SizedBox(height: 6.0),
+                              Row(children: [
+                                Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 0.0, horizontal: 6.0),
+                                    child: Icon(
+                                      Icons.code_rounded,
+                                      color: hintColor,
+                                    )),
+                                RichText(
+                                  text: TextSpan(
+                                    style: TextStyle(
+                                        color: hintColor, fontSize: 12),
+                                    children: <TextSpan>[
+                                      TextSpan(
+                                        text: APP_REPO_LINK.replaceFirst(
+                                            "https://github.com/", ""),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () {
+                                            // Define what happens when the text is tapped here
+                                            launchURL(APP_REPO_LINK);
+                                          },
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            )
-                          ]),
-                          const SizedBox(height: 6.0),
-                        ])))
-              ])));
-  // onTap: () {
-  //   launchURL(APP_REPO_LINK);
-  // },
+                                )
+                              ]),
+                              const SizedBox(height: 6.0),
+                            ])))
+                  ]))));
 }
 
 class NavigationProvider extends InheritedWidget {
@@ -3824,6 +3909,14 @@ class HexColor extends Color {
   HexColor(final String hexColor) : super(_getColorFromHex(hexColor));
 }
 
+Color getUserMsgColor(BuildContext context) =>
+    Theme.of(context).listTileTheme.selectedTileColor ??
+    Colors.deepPurple.shade900;
+
+Color getAIMsgColor(BuildContext context) =>
+    Theme.of(context).listTileTheme.tileColor ??
+    Color.fromRGBO(21, 33, 59, 1.0);
+
 class HandheldHelper extends StatelessWidget {
   const HandheldHelper({super.key});
 
@@ -3834,11 +3927,13 @@ class HandheldHelper extends StatelessWidget {
           ? ColorScheme.fromSeed(
               seedColor: Colors.deepOrange,
               primary: const Color.fromRGBO(255, 90, 0, 1.0),
+              secondary: const Color.fromRGBO(224, 125, 72, 1.0),
               background: Colors.black,
               error: Colors.purple)
           : ColorScheme.fromSeed(
               seedColor: Colors.cyan.shade400,
               primary: Colors.cyan.shade400,
+              secondary: Colors.cyan.shade300,
               background: Colors.white,
               error: Colors.purple),
       scaffoldBackgroundColor: isDarkTheme ? Colors.black : Colors.white,
@@ -3851,10 +3946,14 @@ class HandheldHelper extends StatelessWidget {
           iconColor: isDarkTheme ? Colors.orange : Colors.purple,
           textColor: isDarkTheme ? Colors.white : Colors.black,
           // user msg color
-          selectedTileColor:
-              isDarkTheme ? Colors.purple.shade50 : Colors.purple.shade50,
-          tileColor:
-              isDarkTheme ? Colors.grey.shade900 : Colors.lightBlue.shade50),
+          selectedTileColor: isDarkTheme
+              ? /* Colors.deepPurple.shade800 */ const Color.fromRGBO(
+                  21, 33, 59, 1.0) /* HexColor(
+                  "212f46") */
+              : Colors.purple.shade50,
+          tileColor: isDarkTheme
+              ? /* Colors.grey.shade900 */ const Color.fromRGBO(17, 24, 24, 1.0)
+              : Colors.lightBlue.shade50),
       appBarTheme: AppBarTheme(
           backgroundColor:
               isDarkTheme ? Colors.grey.shade800 : Colors.lightBlue.shade600,
@@ -3867,12 +3966,16 @@ class HandheldHelper extends StatelessWidget {
 
     return baseTheme.copyWith(
       extensions: <ThemeExtension<dynamic>>[
-        const ExtendedThemeData(
-            warning: Color.fromRGBO(210, 170, 98, 1.0),
-            info: Color.fromRGBO(141, 134, 124, 1.0),
+        ExtendedThemeData(
+            warning: const Color.fromRGBO(210, 170, 98, 1.0),
+            info: const Color.fromRGBO(141, 134, 124, 1.0),
             chatMsgWarningFontSize: 14,
-            codeBackgroundColor: Colors.white30,
-            codeTextColor: Colors.black),
+            codeBackgroundColor: isDarkTheme
+                ? const Color.fromRGBO(55, 55, 55, 1.0)
+                : Colors.grey.shade300,
+            codeTextColor: isDarkTheme
+                ? const Color.fromRGBO(147, 224, 161, 1.0)
+                : const Color.fromRGBO(7, 49, 6, 1.0)),
       ],
     );
   }
@@ -3894,7 +3997,7 @@ class HandheldHelper extends StatelessWidget {
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
 
-      theme: getAppTheme(context, false),
+      theme: getAppTheme(context, DEFAULT_THEME_DARK),
 
       //theme: ThemeData(
       //   colorScheme: colorScheme,
