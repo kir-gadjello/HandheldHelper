@@ -175,7 +175,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
         value: widget.progress,
         vsync: this,
         duration: duration,
-      );
+      ); // test
       _controller!.forward(from: widget.progress);
     } else {
       _controller!.reset();
