@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  desktop_disk_space
   native_context_menu
   url_launcher_linux
 )

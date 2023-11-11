@@ -59,6 +59,10 @@ dependencies:
   url_launcher: ^6.2.1
   native_context_menu: ^0.2.2+5
   duration: ^3.0.13
+  system_info2: ^4.0.0
+  disk_space_plus: ^0.2.3
+  desktop_disk_space: ^0.0.1
+  background_downloader: ^7.12.3
 
 dev_dependencies:
   ffigen: ^9.0.1
@@ -121,11 +125,11 @@ ffigen:
   comments: false
 
 flutter_launcher_icons:
-  android: "launcher_icon"
+  android: true
   ios: false
-  image_path: "assets/handheld_helper_launcher_icon_v1.png"
-  adaptive_icon_background: "#0021334E"
-  adaptive_icon_foreground: "assets/handheld_helper_launcher_icon_v1.png"
+  image_path: "assets/reticled_icon_v1.2.png"
+  adaptive_icon_background: "#8800cca3"
+  adaptive_icon_foreground: "assets/reticled_icon_v1.2.png"
   macos:
     generate: true
     image_path: "assets/handheld_helper_launcher_icon_v1.png"

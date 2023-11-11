@@ -220,7 +220,7 @@ class RichMessageText extends StatelessWidget {
                     color: extThemeData.warning,
                     size: extThemeData.chatMsgWarningFontSize! + 2),
                 const SizedBox(width: 2.0),
-                Text("AI answer generation was interrupted for this message",
+                Text("AI answer was interrupted for this message",
                     style: TextStyle(
                         color: extThemeData.warning,
                         fontSize: extThemeData.chatMsgWarningFontSize))

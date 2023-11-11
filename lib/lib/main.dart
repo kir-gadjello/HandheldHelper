@@ -19,6 +19,10 @@ import 'package:getwidget/getwidget.dart';
 import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:flutter_color/flutter_color.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:system_info2/system_info2.dart';
+import 'package:disk_space_plus/disk_space_plus.dart';
+import 'package:desktop_disk_space/desktop_disk_space.dart';
+import 'package:background_downloader/background_downloader.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
@@ -36,6 +40,35 @@ const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
+class SystemInfo {
+  int RAM;
+  double freeDisk;
+  double totalDisk;
+
+  SystemInfo(this.RAM, this.freeDisk, this.totalDisk);
+}
+
+Future<SystemInfo?> getSysInfo() async {
+  int? RAM;
+  double? freeDisk;
+  double? totalDisk;
+  try {
+    RAM = SysInfo.getTotalPhysicalMemory();
+    if (isMobile()) {
+      freeDisk = await DiskSpacePlus.getFreeDiskSpace;
+      totalDisk = await DiskSpacePlus.getTotalDiskSpace;
+    } else {
+      totalDisk = (await DesktopDiskSpace.instance.getTotalSpace() ?? -1) * 1.0;
+      freeDisk = (await DesktopDiskSpace.instance.getFreeSpace() ?? -1) * 1.0;
+    }
+  } catch (e) {
+    print("Exception in getSysInfo: $e");
+  }
+  if (RAM != null && freeDisk != null && totalDisk != null) {
+    return SystemInfo(RAM!, freeDisk!, totalDisk!);
+  }
+}
+
 void launchURL(String url) async {
   if (await canLaunch(url)) {
     await launch(url);
@@ -44,14 +77,18 @@ void launchURL(String url) async {
   }
 }
 
-Future<void> requestStoragePermission() async {
-  var status = await Permission.manageExternalStorage.request();
+Future<bool> requestStoragePermission() async {
+  var status = await Permission.storage.request();
   if (status.isGranted) {
     print('Storage permission granted');
+    return true;
   } else if (status.isPermanentlyDenied) {
     openAppSettings();
   }
+  return false;
 }
+
+// [Permission.storage].request()
 
 // Global storage for progress speeds
 Map<String, double> progressSpeeds = {};
@@ -175,7 +212,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
         value: widget.progress,
         vsync: this,
         duration: duration,
-      ); // test
+      );
       _controller!.forward(from: widget.progress);
     } else {
       _controller!.reset();
@@ -210,37 +247,48 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
   }
 }
 
-/* widget source code */
-class HttpDownloadWidget extends StatefulWidget {
+Future<File> moveFile(File sourceFile, String newPath) async {
+  try {
+    // prefer using rename as it is probably faster
+    return await sourceFile.rename(newPath);
+  } on FileSystemException catch (e) {
+    // if rename fails, copy the source file and then delete it
+    final newFile = await sourceFile.copy(newPath);
+    await sourceFile.delete();
+    return newFile;
+  }
+}
+
+class BackgroundDownloadWidget extends StatefulWidget {
   final String url;
   final String destinationPath;
   final TextStyle? textStyle;
   Function(bool success, String url, String dstPath)? onDownloadEnd;
-  final http.Client? client;
 
-  HttpDownloadWidget(
+  BackgroundDownloadWidget(
       {Key? key,
       required this.url,
       required this.destinationPath,
       this.onDownloadEnd,
-      this.textStyle,
-      this.client})
+      this.textStyle})
       : super(key: key);
 
   @override
-  _HttpDownloadWidgetState createState() => _HttpDownloadWidgetState();
+  _BackgroundDownloadWidgetState createState() =>
+      _BackgroundDownloadWidgetState();
 }
 
-class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
-  late http.StreamedResponse response;
+class _BackgroundDownloadWidgetState extends State<BackgroundDownloadWidget> {
+  int expectedFileSize = 0;
   double progress = 0.0;
+  double _downloadSpeed = 0;
   bool isDownloading = false;
   bool downloadSuccess = false;
   bool isContinuingDownload = false;
   int _downloaded = 0;
   String errorCode = '';
-  DateTime startTime = DateTime
-      .now(); // Added this line to declare and initialize the startTime field
+  DateTime startTime = DateTime.now();
+  String? tempDlPath;
 
   @override
   void initState() {
@@ -254,26 +302,34 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
         isDownloading = true;
       });
 
-      final http.Client client = widget.client ?? http.Client();
-      final http.StreamedResponse response =
-          await client.send(http.Request('GET', Uri.parse(widget.url)));
-      this.response = response;
-      var total = response.contentLength ?? 0;
-      _downloaded = 0;
+      var fileName = Path.basename(widget.destinationPath);
 
-      final file = File(widget.destinationPath);
+      final task = DownloadTask(
+        url: widget.url,
+        baseDirectory: BaseDirectory.applicationDocuments,
+        filename: Path.basename(widget.destinationPath),
+        updates: Updates.statusAndProgress,
+      );
 
-      // Check if the file already exists
-      if (await file.exists()) {
-        _downloaded = await File(attemptResolveSymlink(file.path)).length();
-        // If the file already exists and its size is less than the total file size,
-        // initiate a partial download
-        if (_downloaded < total) {
-          response.request?.headers.addAll({'Range': 'bytes=$_downloaded-'});
-          setState(() {
-            isContinuingDownload = true;
-          });
-        } else if (_downloaded == total) {
+      tempDlPath = Path.join(
+          (await getApplicationDocumentsDirectory()).absolute.path, fileName);
+
+      expectedFileSize = await task.expectedFileSize();
+
+      final result =
+          await FileDownloader().download(task, onProgress: (progress) {
+        setState(() {
+          this.progress = progress;
+        });
+      }, onStatus: (status) async {
+        if (status == TaskStatus.complete) {
+          print(
+              "DL complete! Moving file from $tempDlPath to ${widget.destinationPath}");
+          try {
+            await moveFile(File(tempDlPath!), widget.destinationPath);
+          } catch (e) {
+            print("Error! could not move file... $e");
+          }
           setState(() {
             isDownloading = false;
             downloadSuccess = true;
@@ -281,33 +337,28 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
               widget.onDownloadEnd!(true, widget.url, widget.destinationPath);
             }
           });
-          return;
-        } else {
-          print("HTTP DOWNLOADED: replacing file due to wrong size");
-          await file.delete();
+        } else if (status == TaskStatus.canceled ||
+            status == TaskStatus.paused) {
+          setState(() {
+            isDownloading = false;
+            errorCode = status.toString();
+            if (widget.onDownloadEnd != null) {
+              widget.onDownloadEnd!(false, widget.url, widget.destinationPath);
+            }
+          });
         }
-      }
+      });
 
-      final fileSink = file.openWrite(mode: FileMode.append);
-
-      await response.stream.listen((data) {
-        fileSink.add(data);
-        progress = _downloaded / total;
-        _downloaded += data.length;
-        setState(() {
-          _downloaded;
-        });
-      }).asFuture();
-
-      await fileSink.flush();
-      await fileSink.close();
-      client.close();
-
-      setState(() {
-        isDownloading = false;
-        downloadSuccess = true;
-        if (widget.onDownloadEnd != null) {
-          widget.onDownloadEnd!(true, widget.url, widget.destinationPath);
+      FileDownloader().updates.listen((update) {
+        if (update is TaskStatusUpdate) {
+          print(
+              'Status update for ${update.task} with status ${update.status}');
+        } else if (update is TaskProgressUpdate) {
+          print(
+              'Progress update for ${update.task} with progress ${update.progress}');
+          setState(() {
+            _downloadSpeed = update.networkSpeed;
+          });
         }
       });
     } catch (e) {
@@ -320,51 +371,6 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
       });
     }
   }
-
-  // Future<void> downloadFile() async {
-  //   try {
-  //     setState(() {
-  //       isDownloading = true;
-  //     });
-  //
-  //     final http.Client client = http.Client();
-  //     final http.StreamedResponse response =
-  //         await client.send(http.Request('GET', Uri.parse(widget.url)));
-  //     this.response = response;
-  //     var total = response.contentLength ?? 0;
-  //     var downloaded = 0;
-  //
-  //     final file = File(widget.destinationPath);
-  //     // '${widget.destinationPath}/${response.headers['content-disposition']?.split('filename=')[1] ?? 'unknown_file'}');
-  //     final fileSink = file.openWrite();
-  //     await response.stream.listen((data) {
-  //       fileSink.add(data);
-  //       downloaded += data.length;
-  //       progress = downloaded / total;
-  //       setState(() {});
-  //     }).asFuture();
-  //
-  //     await fileSink.flush();
-  //     await fileSink.close();
-  //     client.close();
-  //
-  //     setState(() {
-  //       isDownloading = false;
-  //       downloadSuccess = true;
-  //       if (widget.onDownloadEnd != null) {
-  //         widget.onDownloadEnd!(true, widget.url, widget.destinationPath);
-  //       }
-  //     });
-  //   } catch (e) {
-  //     setState(() {
-  //       isDownloading = false;
-  //       errorCode = e.toString();
-  //       if (widget.onDownloadEnd != null) {
-  //         widget.onDownloadEnd!(false, widget.url, widget.destinationPath);
-  //       }
-  //     });
-  //   }
-  // }
 
   @override
   Widget build(BuildContext context) {
@@ -386,12 +392,14 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
             if (isDownloading)
               SizedBox(
                   width: 95,
-                  child: Text("${getSpeedString(_downloaded)} ",
+                  child: Text("${getSpeedString(expectedFileSize * progress)} ",
                       style: widget.textStyle)),
             if (isDownloading)
               Text(
                   isContinuingDownload ? 'Continuing download' : 'Downloading ',
                   style: widget.textStyle),
+          ]),
+          Row(children: [
             Expanded(
                 child: Container(
               margin: const EdgeInsets.all(2.0),
@@ -419,6 +427,7 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
                 child: LinearProgressIndicator(
                   value: progress,
                   color: Colors.green,
+                  borderRadius: BorderRadius.circular(5.0),
                 )),
           if (downloadSuccess)
             Column(
@@ -435,8 +444,7 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
                   children: [
                     Container(
                       padding: EdgeInsets.all(8.0),
-                      child: Text(
-                          '${getSizeString(response.contentLength ?? 0)}',
+                      child: Text('${getSizeString(expectedFileSize ?? 0)}',
                           style: widget.textStyle),
                     ),
                     Container(
@@ -447,7 +455,7 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
                     Container(
                       padding: EdgeInsets.all(8.0),
                       child: Text(
-                          '${getSpeedString(response.contentLength ?? 0)}',
+                          '${getSpeedString(expectedFileSize * progress)}',
                           style: widget.textStyle),
                     ),
                   ],
@@ -490,79 +498,12 @@ class _HttpDownloadWidgetState extends State<HttpDownloadWidget> {
     return ret;
   }
 
-  String getSpeedString(int size) {
+  String getSpeedString(double size) {
     final speed = (size / (DateTime.now().difference(startTime).inSeconds)) /
         (1024 * 1024);
     return speed.isFinite ? '${speed.toStringAsFixed(2)} MB/s' : '';
   }
 }
-
-// class DownloadWidget extends StatefulWidget {
-//   final String url;
-//   final String savePath;
-//   final Function(bool, String?, String?, dynamic) onComplete;
-//
-//   DownloadWidget(
-//       {required this.url, required this.savePath, required this.onComplete});
-//
-//   @override
-//   _DownloadWidgetState createState() => _DownloadWidgetState();
-// }
-//
-// class _DownloadWidgetState extends State<DownloadWidget> {
-//   String? downloadId;
-//   double downloadProgress = 0;
-//
-//   @override
-//   void initState() {
-//     super.initState();
-//
-//     FlutterDownloader.initialize(debug: true)
-//         .then((_) => FlutterDownloader.registerCallback((id, status, progress) {
-//               setState(() {
-//                 downloadId = id;
-//                 downloadProgress = progress / 100;
-//               });
-//             }));
-//
-//     final taskId = FlutterDownloader.enqueue(
-//       url: widget.url,
-//       savedDir: widget.savePath,
-//       showNotification: true,
-//       openFileFromNotification: true,
-//     );
-//
-//     setState(() async {
-//       downloadId = await taskId;
-//     });
-//   }
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return Column(
-//       children: <Widget>[
-//         LinearProgressIndicator(
-//           value: downloadProgress,
-//           backgroundColor: Colors.grey[200],
-//         ),
-//         Text(
-//           downloadProgress == 1 ? 'Download completed' : 'Downloading',
-//           style: TextStyle(fontSize: 16),
-//         ),
-//         Text(
-//           widget.url,
-//           style: TextStyle(fontSize: 16, color: Colors.blue),
-//         ),
-//       ],
-//     );
-//   }
-//
-//   @override
-//   void dispose() {
-//     FlutterDownloader.registerCallback((id, status, progress) {});
-//     super.dispose();
-//   }
-// }
 
 final ChatUser user_SYSTEM = ChatUser(
   id: '0',
@@ -647,7 +588,17 @@ final APPROVED_LLMS = [
   ])
 ];
 
-const DEFAULT_LLM = 'OpenHermes-2.5-Mistral-7B';
+String resolve_default_llm() {
+  const defmod = const String.fromEnvironment("DEFAULTMODEL", defaultValue: "");
+  if (defmod.isNotEmpty) {
+    print("Overriding default model: $defmod");
+  }
+  var llm = APPROVED_LLMS.firstWhere((llm) => llm.name == defmod,
+      orElse: () => APPROVED_LLMS[0]);
+  return llm.name;
+}
+
+String DEFAULT_LLM = resolve_default_llm();
 
 final defaultLLM =
     APPROVED_LLMS.firstWhere((element) => element.name == DEFAULT_LLM);
@@ -1589,6 +1540,7 @@ class _AppSetupForm extends State<AppSetupForm> {
   double btnFontSize = 20;
   bool canUserAdvance = false;
   bool remind_storage_permissions = true;
+  bool permissions_asked = false;
   bool _downloadCanStart = false;
   bool _downloadNecessary = true;
   bool _downloadSucceeded = false;
@@ -1601,10 +1553,16 @@ class _AppSetupForm extends State<AppSetupForm> {
   String? _file;
   final _formKey = GlobalKey<FormState>();
 
+  SystemInfo? sysinfo;
+
   @override
   void initState() {
     super.initState();
     btnTextColor = canUserAdvance ? Colors.lightGreenAccent : Colors.grey;
+  }
+
+  _getSysInfo() async {
+    sysinfo = await getSysInfo();
   }
 
   _resetOneClickState() {
@@ -1709,6 +1667,11 @@ class _AppSetupForm extends State<AppSetupForm> {
     if (f['hhh_dir'] is String) {}
   }
 
+  _update_permission_status() async {
+    remind_storage_permissions = !await requestStoragePermission();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final platform_requires_storage_permissions =
@@ -1716,6 +1679,8 @@ class _AppSetupForm extends State<AppSetupForm> {
 
     var largeBtnFontStyle =
         TextStyle(fontSize: btnFontSize, color: Colors.blue);
+
+    double setupTextSize = isMobile() ? 13 : 15;
 
     final hhh_dir = widget.resolved_defaults.hhh_dir;
     final hhh_model_dir =
@@ -1725,19 +1690,30 @@ class _AppSetupForm extends State<AppSetupForm> {
     final hhh_llm_dl_path = Path.join(widget.resolved_defaults.hhh_dir,
         HHH_MODEL_SUBDIR, Path.basename(llm_url));
 
-    var mainPadding = Platform.isAndroid
-        ? EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0)
-        : EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
+    var mainPadding = isMobile()
+        ? const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0)
+        : const EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
+
+    var interButtonPadding = isMobile()
+        ? const EdgeInsets.symmetric(vertical: 21.0, horizontal: 12.0)
+        : const EdgeInsets.symmetric(vertical: 24.0, horizontal: 24.0);
+
+    if (!permissions_asked) {
+      _update_permission_status();
+      permissions_asked = true;
+    }
 
     return Container(
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height - 100,
         ),
         // height: MediaQuery.of(context).size.height,
-        margin: EdgeInsets.all(48.0),
+        margin: isMobile()
+            ? const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0)
+            : const EdgeInsets.all(48.0),
         decoration: BoxDecoration(
           color: Colors.blue[100],
-          borderRadius: BorderRadius.all(Radius.circular(30)),
+          borderRadius: const BorderRadius.all(Radius.circular(30)),
         ),
         child: SingleChildScrollView(
             child: Padding(
@@ -1754,21 +1730,20 @@ class _AppSetupForm extends State<AppSetupForm> {
                         style: TextStyle(fontSize: 48),
                       ),
                       Padding(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 0, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4.0, vertical: 12),
                           child: Text(
                             '''HandHeld Helper is a fast and lean app allowing you to run LLM AIs locally, on your device.
 HHH respects your privacy: once the LLM is downloaded, it works purely offline and never shares your data.
 LLM checkpoints are large binary files. To download, store, manage and operate them, the app needs certain permissions, as well as network bandwidth and storage space – currently 4.1 GB for a standard 7B model.''',
                             textAlign: TextAlign.left,
-                            style: TextStyle(fontSize: btnFontSize),
+                            style: TextStyle(fontSize: setupTextSize),
                           )),
                       if (remind_storage_permissions &&
                           platform_requires_storage_permissions)
                         HoverableText(
                             child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 24.0, horizontal: 24.0),
+                          padding: interButtonPadding,
                           child: Row(children: [
                             Expanded(
                                 child: Text(
@@ -1791,8 +1766,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                           },
                           collapsedChild: HoverableText(
                               child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 24.0, horizontal: 24.0),
+                            padding: interButtonPadding,
                             child: Row(children: [
                               Expanded(
                                   child: Text(
@@ -1828,7 +1802,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                       CheckmarkedTextRow(
                                           success: _downloadSucceeded,
                                           failure: _downloadFailed,
-                                          customChild: HttpDownloadWidget(
+                                          customChild: BackgroundDownloadWidget(
                                               url: llm_url,
                                               // 'https://example.com/index.html'
                                               destinationPath: hhh_llm_dl_path,
@@ -1858,8 +1832,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                           crossCircle: true,
                           collapsedChild: HoverableText(
                               child: Padding(
-                            padding: EdgeInsets.symmetric(
-                                vertical: 24.0, horizontal: 24.0),
+                            padding: interButtonPadding,
                             child: Row(children: [
                               Expanded(
                                   child: Text(
@@ -1867,14 +1840,13 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                       style: TextStyle(
                                           fontSize: btnFontSize,
                                           color: Colors.blue))),
-                              Icon(Icons.app_settings_alt,
+                              const Icon(Icons.app_settings_alt,
                                   size: 32, color: Colors.grey),
                             ]),
                           )),
                           expandedChild: plainOutlile(
                             Padding(
-                                padding: EdgeInsets.symmetric(
-                                    vertical: 44.0, horizontal: 24.0),
+                                padding: interButtonPadding,
                                 child: Column(children: [
                                   Row(children: [
                                     Expanded(
@@ -1883,7 +1855,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                             style: TextStyle(
                                                 fontSize: btnFontSize,
                                                 color: Colors.blue))),
-                                    Icon(Icons.app_settings_alt,
+                                    const Icon(Icons.app_settings_alt,
                                         size: 32, color: Colors.grey)
                                   ]),
                                   SizedBox(height: 16),
@@ -1903,7 +1875,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                       isDirectoryPicker: true),
                                   SizedBox(height: 16),
                                   Padding(
-                                      padding: EdgeInsets.symmetric(
+                                      padding: const EdgeInsets.symmetric(
                                           horizontal: 0, vertical: 12),
                                       child: EnabledButton(
                                           isDisabled: !canUserAdvance,
@@ -1923,10 +1895,10 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                                             color:
                                                                 btnTextColor))),
                                                 Padding(
-                                                    padding:
-                                                        EdgeInsets.symmetric(
-                                                            horizontal: 8.0,
-                                                            vertical: 0.0),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 8.0,
+                                                        vertical: 0.0),
                                                     child: Icon(Icons.chat,
                                                         color: btnTextColor))
                                               ])))
@@ -2796,7 +2768,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         ((_prompt_processing_completed == null) ||
             (_prompt_processing_completed != null &&
                 now.difference(_prompt_processing_completed!).inMilliseconds <
-                    500))) {
+                    100))) {
       showMsgProgress = true;
     }
 
@@ -2896,7 +2868,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               // showTypingPlaceholder: const SizedBox(height: 64),
               typingBuilder: (ChatUser user) => ProgressTypingBuilder(
                   user: user,
-                  text: aiIsThinking ? 'is thinking' : 'is typing',
+                  text: (showMsgProgress || aiIsThinking)
+                      ? 'is thinking'
+                      : 'is typing',
                   pkey: "prompt_processing_${llm.modelpath}",
                   workAmount: _prompt_processing_ntokens,
                   showProgress: showMsgProgress,
