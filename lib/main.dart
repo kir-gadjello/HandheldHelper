@@ -9,7 +9,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
-import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
 import 'llm_engine.dart';
 import 'package:path_provider/path_provider.dart';
@@ -23,6 +22,7 @@ import 'package:system_info2/system_info2.dart';
 import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:desktop_disk_space/desktop_disk_space.dart';
 import 'package:background_downloader/background_downloader.dart';
+import 'package:filesystem_picker/filesystem_picker.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
@@ -34,11 +34,23 @@ final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
 const APPBAR_WIDTH = 220.0;
 const DEFAULT_THEME_DARK = true;
 const MOBILE_DRAWER_TP = 84.0;
-
+const WorkspaceRoot = "HHH";
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
+
+final APPROVED_LLMS = [
+  LLMref(name: 'OpenHermes-2.5-Mistral-7B', size: 4368450304, sources: [
+    "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
+  ]),
+  LLMref(name: 'OpenHermes-2-Mistral-7B', size: 4368450272, sources: [
+    "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
+  ]),
+  LLMref(name: "TinyLLAMA-1t-OpenOrca", size: 667814368, sources: [
+    "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
+  ])
+];
 
 class SystemInfo {
   int RAM;
@@ -87,8 +99,6 @@ Future<bool> requestStoragePermission() async {
   }
   return false;
 }
-
-// [Permission.storage].request()
 
 // Global storage for progress speeds
 Map<String, double> progressSpeeds = {};
@@ -551,6 +561,7 @@ class RootAppParams {
 class LLMref {
   List<String> sources;
   String? fileName;
+  String? promptFormat = "chatml";
   String name;
   int size;
   Map<String, dynamic>? meta;
@@ -567,6 +578,7 @@ class LLMref {
       {required this.sources,
       required this.name,
       required this.size,
+      this.promptFormat,
       this.meta,
       this.fileName}) {
     if (fileName == null) {
@@ -576,20 +588,8 @@ class LLMref {
   }
 }
 
-final APPROVED_LLMS = [
-  LLMref(name: 'OpenHermes-2.5-Mistral-7B', size: 4368450304, sources: [
-    "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
-  ]),
-  LLMref(name: 'OpenHermes-2-Mistral-7B', size: 4368450272, sources: [
-    "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
-  ]),
-  LLMref(name: "TinyLLAMA-1t-OpenOrca", size: 667814368, sources: [
-    "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
-  ])
-];
-
 String resolve_default_llm() {
-  const defmod = const String.fromEnvironment("DEFAULTMODEL", defaultValue: "");
+  const defmod = String.fromEnvironment("DEFAULTMODEL", defaultValue: "");
   if (defmod.isNotEmpty) {
     print("Overriding default model: $defmod");
   }
@@ -630,8 +630,12 @@ class HHHDefaults {
 }
 
 String resolve_llm_file(RootAppParams p) {
+  if (Path.basename(p.default_model) != p.default_model) {
+    return p.default_model;
+  }
+
   var ret = Path.join(p.hhh_dir, "Models", p.default_model);
-  final fcand = (String.fromEnvironment("MODELPATH") ?? "");
+  const fcand = (String.fromEnvironment("MODELPATH") ?? "");
   final env_cand = (Platform.environment["MODELPATH"] ?? "");
   if (fcand.isNotEmpty && File(fcand).existsSync()) {
     print("OVERRIDING LLM PATH TO $fcand");
@@ -728,6 +732,10 @@ class AppInitParams {
   bool storagePermissionGranted;
   AppInitParams(this.defaults,
       {this.params, this.storagePermissionGranted = false});
+}
+
+String? guess_user_home_dir() {
+  return Platform.environment["HOME"];
 }
 
 Future<AppInitParams> perform_app_init() async {
@@ -828,28 +836,6 @@ Future<AppInitParams> perform_app_init() async {
   return Future.value(AppInitParams(hhhd, params: rp));
 }
 
-// class MyHomePage extends StatefulWidget {
-//   MyHomePage({super.key, required this.title});
-//   // RootAppParams? this.root_app_params,
-//   // required HHHDefaults this.resolved_defaults});
-//
-//   // This widget is the home page of your application. It is stateful, meaning
-//   // that it has a State object (defined below) that contains fields that affect
-//   // how it looks.
-//
-//   // This class is the configuration for the state. It holds the values (in this
-//   // case the title) provided by the parent (in this case the App widget) and
-//   // used by the build method of the State. Fields in a Widget subclass are
-//   // always marked "final".
-//
-//   final String title;
-//   // RootAppParams? root_app_params;
-//   // HHHDefaults resolved_defaults;
-//
-//   @override
-//   State<MyHomePage> createState() => _MyHomePageState();
-// }
-
 Widget hhhLoader(BuildContext context, {double size = 50}) {
   var bgColor = Theme.of(context).listTileTheme.tileColor;
   var textColor = Theme.of(context).listTileTheme.textColor;
@@ -949,37 +935,6 @@ class ActiveChatDialog extends StatefulWidget {
   State<ActiveChatDialog> createState() => ActiveChatDialogState();
 }
 
-const WorkspaceRoot = "HHH";
-
-// String resolve_llm_file(
-//     {String llm_file = "openhermes-2-mistral-7b.Q4_K_M.gguf"}) {
-//   List<String> paths = [];
-//
-//   String userDataRoot = ".";
-//
-//   if (Platform.isMacOS || Platform.isLinux) {
-//     userDataRoot = Platform.environment["HOME"] ?? "";
-//   } else if (Platform.isAndroid) {
-//     // String internalStoragePrefix = "/data/user/0/<package_name>/files/";
-//     // const String externalStoragePrefix = "/storage/emulated/0/";
-//     userDataRoot = Path.join("/storage/emulated/0/", WorkspaceRoot);
-//   }
-//
-//   paths.add(Path.join(userDataRoot, llm_file));
-//   paths.add(String.fromEnvironment("MODELPATH") ?? "");
-//   paths.add(Platform.environment["MODELPATH"] ?? "");
-//   paths.add(Path.join(".", llm_file));
-//
-//   for (var p in paths) {
-//     if (p.isNotEmpty && File(p).existsSync()) {
-//       dlog("MODEL: probing $p");
-//       return p;
-//     }
-//   }
-//
-//   throw FileSystemException("File not found", llm_file);
-// }
-
 const hermes_sysmsg =
     "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
 
@@ -1017,41 +972,6 @@ Map<String, dynamic> resolve_init_json() {
 
   return {};
 }
-
-void Function(Object?) dlog = (Object? args) {};
-
-// class CollapsibleWidget extends StatefulWidget {
-//   final Widget collapsedChild;
-//   final Widget expandedChild;
-//   final bool blockParentCollapse;
-//
-//   CollapsibleWidget(
-//       {required this.collapsedChild,
-//       required this.expandedChild,
-//       this.blockParentCollapse = false});
-//
-//   @override
-//   _CollapsibleWidgetState createState() => _CollapsibleWidgetState();
-// }
-//
-// class _CollapsibleWidgetState extends State<CollapsibleWidget> {
-//   bool isExpanded = false;
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return GestureDetector(
-//       onTap: () {
-//         if (widget.blockParentCollapse && isExpanded) {
-//           return;
-//         }
-//         setState(() {
-//           isExpanded = !isExpanded;
-//         });
-//       },
-//       child: isExpanded ? widget.expandedChild : widget.collapsedChild,
-//     );
-//   }
-// }
 
 class CollapsibleWidget extends StatefulWidget {
   final Widget collapsedChild;
@@ -1142,9 +1062,9 @@ class _CollapsibleWidgetState extends State<CollapsibleWidget> {
 
 const colorBlueSelected = Color.fromRGBO(191, 238, 234, 1.0);
 
-Widget plainOutlile(Widget w) => Container(
-      padding: EdgeInsets.all(0.0),
-      margin: EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
+Widget plainOutline(Widget w) => Container(
+      padding: const EdgeInsets.all(0.0),
+      margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
       decoration: BoxDecoration(
         color: colorBlueSelected,
         borderRadius: BorderRadius.circular(24.0),
@@ -1182,8 +1102,8 @@ class _HoverableTextState extends State<HoverableText> {
           });
         },
         child: Container(
-          padding: EdgeInsets.all(0.0),
-          margin: EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
+          padding: const EdgeInsets.all(0.0),
+          margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
           decoration: BoxDecoration(
             color: _isHovering
                 ? colorBlueSelected
@@ -1203,11 +1123,13 @@ class EnabledButton extends StatelessWidget {
   final bool isDisabled;
   final String disabledText;
   final Widget child;
+  final VoidCallback onPressed;
 
   EnabledButton(
       {required this.isDisabled,
       required this.disabledText,
-      required this.child});
+      required this.child,
+      required this.onPressed});
 
   final btnDisabledCol = Color.fromRGBO(
       BTN_DISABLED_SHADE, BTN_DISABLED_SHADE, BTN_DISABLED_SHADE, 1.0);
@@ -1242,10 +1164,10 @@ class EnabledButton extends StatelessWidget {
           side: MaterialStateProperty.resolveWith<BorderSide>(
             (Set<MaterialState> states) {
               if (states.contains(MaterialState.disabled)) {
-                return BorderSide(
+                return const BorderSide(
                     color: Colors.grey); // Border color when disabled
               }
-              return BorderSide(
+              return const BorderSide(
                   color: Colors.lightGreen); // Border color when enabled
             },
           ),
@@ -1253,20 +1175,41 @@ class EnabledButton extends StatelessWidget {
       ),
       onPressed: isDisabled
           ? null // Button is disabled
-          : () {
-              Navigator.pushNamed(context, '/chat/main'); // Open chat route
-            },
+          : onPressed,
       child: isDisabled
           ? Column(mainAxisSize: MainAxisSize.min, children: [
               child,
               Text(
                 disabledText,
-                style: TextStyle(color: Colors.grey, fontSize: 12),
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
               )
             ])
           : child, // No text when button is enabled
     );
   }
+}
+
+Future<String?> getMobileUserDownloadPath() async {
+  Directory? directory;
+  try {
+    if (Platform.isIOS) {
+      directory = await getApplicationDocumentsDirectory();
+    } else {
+      var perm = await Permission.manageExternalStorage.request();
+      if (perm.isGranted) {
+        directory = Directory('/storage/emulated/0/Download');
+        if (!await directory.exists()) {
+          directory = await getExternalStorageDirectory();
+        }
+      } else {
+        print("Could not get MANAGE_EXTERNAL_STORAGE permission...");
+        directory = await getDownloadsDirectory();
+      }
+    }
+  } catch (err, stack) {
+    print("Cannot get download folder path");
+  }
+  return directory?.path;
 }
 
 enum Status { initial, succeeded, failed }
@@ -1275,17 +1218,30 @@ class CustomFilePicker extends StatefulWidget {
   final String label;
   final String name;
   final bool isDirectoryPicker;
+  String? initialValue;
   final Future<bool> Function(String path)? execAdditionalFileCheck;
+  Color errBgBtnColor;
+  Color? errBgColor;
+  Color? errTextColor;
+  List<String>? allowedExtensions;
 
-  CustomFilePicker({
-    required this.label,
-    required this.name,
-    required this.isDirectoryPicker,
-    this.execAdditionalFileCheck,
-  });
+  CustomFilePicker(
+      {required this.label,
+      required this.name,
+      required this.isDirectoryPicker,
+      this.initialValue,
+      this.execAdditionalFileCheck,
+      this.errBgColor,
+      this.errTextColor,
+      this.allowedExtensions,
+      this.errBgBtnColor = Colors.redAccent});
 
   @override
-  _CustomFilePickerState createState() => _CustomFilePickerState();
+  _CustomFilePickerState createState() => _CustomFilePickerState(
+      TextEditingController(text: initialValue),
+      isDirectoryPicker,
+      execAdditionalFileCheck,
+      allowedExtensions);
 }
 
 class _CustomFilePickerState extends State<CustomFilePicker> {
@@ -1293,21 +1249,181 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
   bool _succeeded = false;
   Status _status = Status.initial;
   bool _isLoading = false;
-  TextEditingController _controller = TextEditingController();
+  bool isDirectoryPicker;
+  final Future<bool> Function(String path)? execAdditionalFileCheck;
+  TextEditingController _controller;
+  List<String>? allowedExtensions;
+  FormFieldState<String>? _field;
 
-  Future<void> _pickFileOrDirectory() async {
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  _CustomFilePickerState(this._controller, this.isDirectoryPicker,
+      this.execAdditionalFileCheck, this.allowedExtensions) {
+    if (_controller.text.isNotEmpty) {
+      if (_controller.text.startsWith("__%")) {
+        var specialPath = _controller.text;
+        _controller.text = "";
+        _resolveSpecialDir(specialPath);
+      } else {
+        _path = _controller.text;
+        print("INITIAL PATH: $_path");
+        Future.delayed(Duration(milliseconds: 20), () {
+          _checkFileOrDirectoryExistsImpl(
+              _path, isDirectoryPicker, execAdditionalFileCheck);
+        });
+      }
+    }
+  }
+
+  _resolveSpecialDir(String p) async {
+    if (p == "__%DOWNLOADS") {
+      print("INITIALIZING DOWNLOADS DIR");
+      String? downloads = await getMobileUserDownloadPath() ??
+          (await getApplicationDocumentsDirectory()).path;
+      if (downloads != null) {
+        print("DOWNLOADS DIR = $downloads");
+        _path = downloads;
+        _controller.text = _path;
+        _checkFileOrDirectoryExistsImpl(
+            _path, isDirectoryPicker, execAdditionalFileCheck);
+      }
+    }
+  }
+
+  FilesystemPickerThemeBase _buildTheme() {
+    return FilesystemPickerAutoSystemTheme(
+      darkTheme: FilesystemPickerTheme(
+        topBar: FilesystemPickerTopBarThemeData(
+          backgroundColor: const Color(0xFF4B4B4B),
+        ),
+        fileList: FilesystemPickerFileListThemeData(
+          folderIconColor: Colors.teal.shade400,
+        ),
+      ),
+      lightTheme: FilesystemPickerTheme(
+        backgroundColor: Colors.grey.shade200,
+        topBar: FilesystemPickerTopBarThemeData(
+          foregroundColor: Colors.blueGrey.shade800,
+          backgroundColor: Colors.grey.shade200,
+          elevation: 0,
+          shape: const ContinuousRectangleBorder(
+            side: BorderSide(
+              color: Color(0xFFDDDDDD),
+              width: 1.0,
+            ),
+          ),
+          iconTheme: const IconThemeData(
+            color: Colors.black,
+            opacity: 0.3,
+            size: 32,
+          ),
+          titleTextStyle: const TextStyle(fontWeight: FontWeight.bold),
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarBrightness: Brightness.light,
+            statusBarIconBrightness: Brightness.light,
+            statusBarColor: Colors.blueGrey.shade600,
+          ),
+          breadcrumbsTheme: BreadcrumbsThemeData(
+            itemColor: Colors.blue.shade800,
+            inactiveItemColor: Colors.blue.shade800.withOpacity(0.6),
+            separatorColor: Colors.blue.shade800.withOpacity(0.3),
+          ),
+        ),
+        fileList: FilesystemPickerFileListThemeData(
+          iconSize: 32,
+          folderIcon: Icons.folder_open,
+          folderIconColor: Colors.orange,
+          folderTextStyle: TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 18,
+              color: Colors.blueGrey.shade700),
+          fileIcon: Icons.description_outlined,
+          fileIconColor: Colors.deepOrange,
+          fileTextStyle: TextStyle(fontSize: 18, color: Colors.grey.shade700),
+          upIcon: Icons.drive_folder_upload,
+          upIconSize: 32,
+          upIconColor: Colors.pink,
+          upText: '<up-dir>',
+          upTextStyle: const TextStyle(fontSize: 18, color: Colors.pink),
+          checkIcon: Icons.add_circle,
+          checkIconColor: Colors.deepOrange,
+          progressIndicatorColor: Colors.pink,
+        ),
+        pickerAction: FilesystemPickerActionThemeData(
+          foregroundColor: Colors.blueGrey.shade800,
+          disabledForegroundColor: Colors.blueGrey.shade500,
+          backgroundColor: Colors.grey.shade200,
+          shape: const ContinuousRectangleBorder(
+            side: BorderSide(
+              color: Color(0xFFDDDDDD),
+              width: 1.0,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _pickPath(BuildContext context,
+      {String? rootPath,
+      bool isDirectory = false,
+      List<String>? allowedExtensions}) async {
+    String? ret;
+    var text = isDirectory ? 'Select folder' : 'Select file';
+
+    if (rootPath != null && Path.dirname(rootPath) != rootPath) {
+      rootPath = Path.dirname(rootPath);
+    }
+
+    if (rootPath == null || !Directory(rootPath).existsSync()) {
+      rootPath = (await getApplicationDocumentsDirectory()).absolute.path;
+      print("PICK PATH: DEFAULTING TO PATH $rootPath");
+    }
+    debugPrint('Root path: $rootPath allowedExtensions=$allowedExtensions');
+
+    if (context.mounted) {
+      String? path = await FilesystemPicker.open(
+        theme: _buildTheme(),
+        title: text,
+        context: context,
+        rootDirectory: Directory(rootPath),
+        fsType: isDirectory ? FilesystemType.folder : FilesystemType.file,
+        pickText: text,
+        allowedExtensions: allowedExtensions,
+        requestPermission: isMobile()
+            ? () async => await Permission.storage.request().isGranted
+            : null,
+      );
+
+      ret = path;
+    }
+
+    return ret;
+  }
+
+  void _pickFileOrDirectory(BuildContext context,
+      {String? initialPath, List<String>? allowedExtensions}) async {
     setState(() {
       _isLoading = true;
     });
 
     String? path;
     try {
-      if (widget.isDirectoryPicker) {
-        path = await FilePicker.platform.getDirectoryPath();
-      } else {
-        FilePickerResult? result = await FilePicker.platform.pickFiles();
-        path = result?.files.single.path;
-      }
+      // if (widget.isDirectoryPicker) {
+      //   path = await FilePicker.platform.getDirectoryPath();
+      // } else {
+      //   FilePickerResult? result = await FilePicker.platform.pickFiles();
+      //   path = result?.files.single.path;
+      // }
+      print("PICK PATH: $isDirectoryPicker $initialPath");
+      path = await _pickPath(context,
+          rootPath: initialPath,
+          isDirectory: isDirectoryPicker,
+          allowedExtensions: allowedExtensions);
     } catch (e) {
       print(e);
     } finally {
@@ -1320,17 +1436,26 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
       setState(() {
         _controller.text = path!;
         _path = path!;
+        _field?.didChange(path!);
       });
-      _checkFileOrDirectoryExists();
+      _checkFileOrDirectoryExistsImpl(path!, isDirectoryPicker, null);
     }
   }
 
   Future<void> _checkFileOrDirectoryExists() async {
-    bool exists = await (widget.isDirectoryPicker
-        ? Directory(_path).exists()
-        : File(_path).exists());
-    if (exists && widget.execAdditionalFileCheck != null) {
-      exists = await widget.execAdditionalFileCheck!(_path);
+    if (widget != null) {
+      _checkFileOrDirectoryExistsImpl(
+          _path, widget.isDirectoryPicker, widget.execAdditionalFileCheck);
+    }
+  }
+
+  Future<void> _checkFileOrDirectoryExistsImpl(String path, bool isDir,
+      Future<bool> Function(String path)? execAdditionalFileCheck) async {
+    bool exists =
+        await (isDir ? Directory(path).exists() : File(path).exists());
+
+    if (exists && execAdditionalFileCheck != null) {
+      exists = await execAdditionalFileCheck!(path);
     }
 
     setState(() {
@@ -1343,34 +1468,43 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
   Widget build(BuildContext context) {
     var fileOrDir = widget.isDirectoryPicker ? "directory" : "file";
     return Container(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        padding: isMobile()
+            ? const EdgeInsets.symmetric(vertical: 2, horizontal: 2)
+            : const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         decoration: BoxDecoration(
-          color: _succeeded ? Colors.lightGreen[100] : Colors.red[50],
-          borderRadius: BorderRadius.all(Radius.circular(16)),
+          color: _succeeded
+              ? Colors.lightGreen[100]
+              : widget.errBgColor ?? Colors.red[50],
+          borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
         child: Row(
           children: [
             Expanded(
               child: FastTextField(
+                  initialValue: widget.initialValue,
                   builder: (FormFieldState<String> field) {
+                    _field = field;
                     return TextField(
+                      onChanged: (value) => {field.didChange(value)},
                       controller: _controller,
-                      onChanged: (value) {
-                        field.didChange(value);
-                      },
                       decoration: InputDecoration(
+                        contentPadding: isMobile()
+                            ? const EdgeInsets.symmetric(
+                                vertical: 2, horizontal: 2)
+                            : const EdgeInsets.symmetric(
+                                vertical: 4, horizontal: 4),
                         labelStyle: TextStyle(
-                            fontSize: 20,
+                            fontSize: isMobile() ? 14 : 20,
                             color: _succeeded
                                 ? Colors.green.shade400
-                                : Colors.red),
+                                : widget.errTextColor ?? Colors.red),
                         labelText: widget.label,
                         hintText: widget.isDirectoryPicker
                             ? 'Pick directory'
                             : 'Pick file',
                         fillColor: _succeeded
                             ? Colors.lightGreen
-                            : Colors.red.shade100,
+                            : widget.errBgBtnColor,
                       ),
                     );
                   },
@@ -1382,23 +1516,26 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
                     color: _status == Status.succeeded
                         ? Colors.lightGreen
                         : _status == Status.failed
-                            ? Colors.redAccent
+                            ? widget.errBgBtnColor
                             : Colors.grey,
                   ),
                   onChanged: (value) {
-                    if (value != null) {
+                    if (value != null && widget != null) {
                       _path = value;
                       _checkFileOrDirectoryExists();
                     }
                   }),
             ),
             ElevatedButton(
-              onPressed: _isLoading ? null : _pickFileOrDirectory,
+              onPressed: _isLoading
+                  ? null
+                  : () => _pickFileOrDirectory(context,
+                      initialPath: _path, allowedExtensions: allowedExtensions),
               style: ElevatedButton.styleFrom(
                 primary: _status == Status.succeeded
                     ? Colors.lightGreen
                     : _status == Status.failed
-                        ? Colors.redAccent
+                        ? widget.errBgBtnColor
                         : Colors.grey[300],
               ),
               child: _isLoading
@@ -1539,7 +1676,7 @@ const HHH_MODEL_SUBDIR = "Models";
 class _AppSetupForm extends State<AppSetupForm> {
   double btnFontSize = 20;
   bool canUserAdvance = false;
-  bool remind_storage_permissions = true;
+  bool remind_storage_permissions = !Platform.isLinux;
   bool permissions_asked = false;
   bool _downloadCanStart = false;
   bool _downloadNecessary = true;
@@ -1547,18 +1684,19 @@ class _AppSetupForm extends State<AppSetupForm> {
   bool _downloadFailed = false;
   bool _downloadCheckedOK = false;
   bool _downloadCheckFailed = false;
+  List<String> _advanced_form_errors = [];
 
   bool _couldNotCreateDirectory = false;
-  Color btnTextColor = Colors.grey;
   String? _file;
   final _formKey = GlobalKey<FormState>();
+
+  RootAppParams? _validRootAppParams;
 
   SystemInfo? sysinfo;
 
   @override
   void initState() {
     super.initState();
-    btnTextColor = canUserAdvance ? Colors.lightGreenAccent : Colors.grey;
   }
 
   _getSysInfo() async {
@@ -1657,14 +1795,63 @@ class _AppSetupForm extends State<AppSetupForm> {
     setState(() {
       _downloadCheckedOK = llm_file_ok;
       _downloadCheckFailed = !llm_file_ok;
-      Timer(Duration(milliseconds: 500), () {
+      Timer(const Duration(milliseconds: 500), () {
         widget.onSetupComplete(_getOneClickRootAppParams());
       });
     });
   }
 
   _updateAdvancedForm(Map<String, dynamic> f) {
-    if (f['hhh_dir'] is String) {}
+    print("SETUP ADVANCED SETTINGS FORM UPDATE: ${jsonEncode(f)}");
+    String? hhh_dir;
+    String? custom_default_model;
+    _advanced_form_errors = [];
+
+    if (f['hhh_root'] != null) {
+      hhh_dir = f['hhh_root'] as String;
+      if (!directoryExistsAndWritableSync(hhh_dir)) {
+        hhh_dir = null;
+        _advanced_form_errors
+            .add("Custom root directory does not exist or isn't writable");
+      }
+    }
+
+    if (f['custom_default_model'] != null) {
+      custom_default_model = f['custom_default_model'] as String;
+      if (!File(custom_default_model).existsSync()) {
+        custom_default_model = null;
+        _advanced_form_errors.add("Custom model file does not exist.");
+      }
+    }
+
+    if (hhh_dir != null && custom_default_model != null) {
+      Directory(Path.join(hhh_dir, HHH_MODEL_SUBDIR))
+          .createSync(recursive: true);
+
+      List<String> custom_model_dirs = [];
+
+      if (!Path.isWithin(custom_default_model, hhh_dir)) {
+        custom_model_dirs.add(Path.dirname(custom_default_model));
+      }
+
+      if (f['aux_model_root'] != null &&
+          Directory(f['aux_model_root'] as String).existsSync()) {
+        custom_model_dirs.add(f['aux_model_root'] as String);
+      }
+
+      _validRootAppParams =
+          RootAppParams(hhh_dir, custom_default_model, custom_model_dirs);
+
+      setState(() {
+        print("ADVANCED SETUP FORM SUBMIT UNLOCKED");
+        canUserAdvance = true;
+      });
+    } else {
+      setState(() {
+        print("ADVANCED SETUP FORM SUBMIT LOCKED");
+        canUserAdvance = false;
+      });
+    }
   }
 
   _update_permission_status() async {
@@ -1690,8 +1877,10 @@ class _AppSetupForm extends State<AppSetupForm> {
     final hhh_llm_dl_path = Path.join(widget.resolved_defaults.hhh_dir,
         HHH_MODEL_SUBDIR, Path.basename(llm_url));
 
+    String user_home_dir = guess_user_home_dir() ?? hhh_dir;
+
     var mainPadding = isMobile()
-        ? const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0)
+        ? const EdgeInsets.fromLTRB(6.0, 4.0, 6.0, 4.0)
         : const EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
 
     var interButtonPadding = isMobile()
@@ -1703,208 +1892,238 @@ class _AppSetupForm extends State<AppSetupForm> {
       permissions_asked = true;
     }
 
+    final viewInsets = EdgeInsets.fromViewPadding(
+        View.of(context).viewInsets, View.of(context).devicePixelRatio);
+    double keyboardHeight = viewInsets.bottom;
+
+    const separator = SizedBox(height: 16);
+
     return Container(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height - 100,
+          maxHeight: MediaQuery.of(context).size.height - keyboardHeight - 150,
         ),
+        clipBehavior: Clip.hardEdge,
         // height: MediaQuery.of(context).size.height,
         margin: isMobile()
-            ? const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0)
+            ? const EdgeInsets.fromLTRB(2.0, 4.0, 2.0, 4.0)
             : const EdgeInsets.all(48.0),
         decoration: BoxDecoration(
           color: Colors.blue[100],
           borderRadius: const BorderRadius.all(Radius.circular(30)),
         ),
-        child: SingleChildScrollView(
-            child: Padding(
-                padding: mainPadding,
+        child: Padding(
+            padding: mainPadding,
+            child: SingleChildScrollView(
                 child: FastForm(
                     formKey: _formKey,
                     onChanged: (m) {
-                      print("SETUP FORM: ${jsonEncode(m)}");
                       _updateAdvancedForm(m);
                     },
                     children: <Widget>[
-                      const Text(
-                        'Welcome 👋💠',
-                        style: TextStyle(fontSize: 48),
-                      ),
-                      Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4.0, vertical: 12),
-                          child: Text(
-                            '''HandHeld Helper is a fast and lean app allowing you to run LLM AIs locally, on your device.
+                  const Text(
+                    'Welcome 👋💠',
+                    style: TextStyle(fontSize: 48),
+                  ),
+                  Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4.0, vertical: 12),
+                      child: Text(
+                        '''HandHeld Helper is a fast and lean app allowing you to run LLM AIs locally, on your device.
 HHH respects your privacy: once the LLM is downloaded, it works purely offline and never shares your data.
 LLM checkpoints are large binary files. To download, store, manage and operate them, the app needs certain permissions, as well as network bandwidth and storage space – currently 4.1 GB for a standard 7B model.''',
-                            textAlign: TextAlign.left,
-                            style: TextStyle(fontSize: setupTextSize),
-                          )),
-                      if (remind_storage_permissions &&
-                          platform_requires_storage_permissions)
-                        HoverableText(
-                            child: Padding(
-                          padding: interButtonPadding,
-                          child: Row(children: [
-                            Expanded(
-                                child: Text(
-                              'Please accept data storage permissions.',
-                              style: largeBtnFontStyle,
-                            )),
-                            const Icon(Icons.check,
-                                size: 32, color: Colors.grey),
-                          ]),
+                        textAlign: TextAlign.left,
+                        style: TextStyle(fontSize: setupTextSize),
+                      )),
+                  if (remind_storage_permissions &&
+                      platform_requires_storage_permissions)
+                    HoverableText(
+                        child: Padding(
+                      padding: interButtonPadding,
+                      child: Row(children: [
+                        Expanded(
+                            child: Text(
+                          'Please accept data storage permissions.',
+                          style: largeBtnFontStyle,
                         )),
-                      CollapsibleWidget(
-                          crossCircle: true,
-                          onExpand: () {
-                            print("START HTTP DOWNLOAD SEQUENCE");
-                            _oneClickInstallInit();
-                          },
-                          onCollapse: () {
-                            print("CLOSE HTTP DOWNLOAD SEQUENCE");
-                            _resetOneClickState();
-                          },
-                          collapsedChild: HoverableText(
-                              child: Padding(
-                            padding: interButtonPadding,
-                            child: Row(children: [
-                              Expanded(
-                                  child: Text(
-                                'Accept the data storage defaults and download the recommended LLM (${defaultLLM.name})',
-                                style: largeBtnFontStyle,
-                              )),
-                              const Icon(Icons.download_for_offline,
-                                  size: 32, color: Colors.grey),
-                            ]),
+                        const Icon(Icons.check, size: 32, color: Colors.grey),
+                      ]),
+                    )),
+                  CollapsibleWidget(
+                      crossCircle: true,
+                      onExpand: () {
+                        print("START HTTP DOWNLOAD SEQUENCE");
+                        _oneClickInstallInit();
+                      },
+                      onCollapse: () {
+                        print("CLOSE HTTP DOWNLOAD SEQUENCE");
+                        _resetOneClickState();
+                      },
+                      collapsedChild: HoverableText(
+                          child: Padding(
+                        padding: interButtonPadding,
+                        child: Row(children: [
+                          Expanded(
+                              child: Text(
+                            'Accept the data storage defaults and download the recommended LLM (${defaultLLM.name})',
+                            style: largeBtnFontStyle,
                           )),
-                          expandedChild: plainOutlile(
-                            Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 44.0, horizontal: 24.0),
-                                child: Column(children: [
-                                  Row(children: [
-                                    Expanded(
-                                        child: Text(
-                                      'Accept the data storage defaults and download the default LLM (${defaultLLM.name})',
-                                      style: largeBtnFontStyle,
-                                    )),
-                                    const Icon(Icons.download_for_offline,
-                                        size: 32, color: Colors.grey),
-                                  ]),
-                                  const SizedBox(height: 12.0),
+                          const Icon(Icons.download_for_offline,
+                              size: 32, color: Colors.grey),
+                        ]),
+                      )),
+                      expandedChild: plainOutline(
+                        Padding(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 44.0, horizontal: 24.0),
+                            child: Column(children: [
+                              Row(children: [
+                                Expanded(
+                                    child: Text(
+                                  'Accept the data storage defaults and download the default LLM (${defaultLLM.name})',
+                                  style: largeBtnFontStyle,
+                                )),
+                                const Icon(Icons.download_for_offline,
+                                    size: 32, color: Colors.grey),
+                              ]),
+                              const SizedBox(height: 12.0),
+                              CheckmarkedTextRow(
+                                  text: "The directory $hhh_dir exists",
+                                  success: _downloadCanStart,
+                                  failure: _couldNotCreateDirectory),
+                              const SizedBox(height: 12.0),
+                              if (_downloadCanStart) ...[
+                                if (_downloadNecessary) ...[
                                   CheckmarkedTextRow(
-                                      text: "The directory $hhh_dir exists",
-                                      success: _downloadCanStart,
-                                      failure: _couldNotCreateDirectory),
-                                  const SizedBox(height: 12.0),
-                                  if (_downloadCanStart) ...[
-                                    if (_downloadNecessary) ...[
-                                      CheckmarkedTextRow(
-                                          success: _downloadSucceeded,
-                                          failure: _downloadFailed,
-                                          customChild: BackgroundDownloadWidget(
-                                              url: llm_url,
-                                              // 'https://example.com/index.html'
-                                              destinationPath: hhh_llm_dl_path,
-                                              onDownloadEnd: (success, b, c) {
-                                                if (success) {
-                                                  _downloadSucceeded = true;
-                                                  print("CHECKING LLM FILE...");
-                                                  _oneClickInstallCheckLLM();
-                                                } else {
-                                                  _downloadFailed = true;
-                                                }
-                                              },
-                                              textStyle: TextStyle(
-                                                  fontSize: btnFontSize * 0.8,
-                                                  color: largeBtnFontStyle
-                                                      .color))),
-                                      SizedBox(height: 12.0)
-                                    ],
-                                    CheckmarkedTextRow(
-                                        text: "LLM checkpoint is available",
-                                        success: _downloadCheckedOK,
-                                        failure: _downloadCheckFailed),
-                                  ]
-                                ])),
-                          )),
-                      CollapsibleWidget(
-                          crossCircle: true,
-                          collapsedChild: HoverableText(
-                              child: Padding(
+                                      success: _downloadSucceeded,
+                                      failure: _downloadFailed,
+                                      customChild: BackgroundDownloadWidget(
+                                          url: llm_url,
+                                          // 'https://example.com/index.html'
+                                          destinationPath: hhh_llm_dl_path,
+                                          onDownloadEnd: (success, b, c) {
+                                            if (success) {
+                                              _downloadSucceeded = true;
+                                              print("CHECKING LLM FILE...");
+                                              _oneClickInstallCheckLLM();
+                                            } else {
+                                              _downloadFailed = true;
+                                            }
+                                          },
+                                          textStyle: TextStyle(
+                                              fontSize: btnFontSize * 0.8,
+                                              color: largeBtnFontStyle.color))),
+                                  SizedBox(height: 12.0)
+                                ],
+                                CheckmarkedTextRow(
+                                    text: "LLM checkpoint is available",
+                                    success: _downloadCheckedOK,
+                                    failure: _downloadCheckFailed),
+                              ]
+                            ])),
+                      )),
+                  CollapsibleWidget(
+                      crossCircle: true,
+                      collapsedChild: HoverableText(
+                          child: Padding(
+                        padding: interButtonPadding,
+                        child: Row(children: [
+                          Expanded(
+                              child: Text(
+                                  'Show advanced model & storage settings',
+                                  style: TextStyle(
+                                      fontSize: btnFontSize,
+                                      color: Colors.blue))),
+                          const Icon(Icons.app_settings_alt,
+                              size: 32, color: Colors.grey),
+                        ]),
+                      )),
+                      expandedChild: plainOutline(
+                        Padding(
                             padding: interButtonPadding,
-                            child: Row(children: [
-                              Expanded(
-                                  child: Text(
-                                      'Show advanced model & storage settings',
-                                      style: TextStyle(
-                                          fontSize: btnFontSize,
-                                          color: Colors.blue))),
-                              const Icon(Icons.app_settings_alt,
-                                  size: 32, color: Colors.grey),
-                            ]),
-                          )),
-                          expandedChild: plainOutlile(
-                            Padding(
-                                padding: interButtonPadding,
-                                child: Column(children: [
-                                  Row(children: [
-                                    Expanded(
-                                        child: Text(
-                                            'Advanced model & storage settings',
-                                            style: TextStyle(
-                                                fontSize: btnFontSize,
-                                                color: Colors.blue))),
-                                    const Icon(Icons.app_settings_alt,
-                                        size: 32, color: Colors.grey)
-                                  ]),
-                                  SizedBox(height: 16),
-                                  CustomFilePicker(
-                                      label: "HandHeld Helper root directory",
-                                      name: "hhh_root",
-                                      isDirectoryPicker: true),
-                                  SizedBox(height: 16),
-                                  CustomFilePicker(
-                                      label: "Custom default LLM file (GGUF)",
-                                      name: "custom_default_model",
-                                      isDirectoryPicker: false),
-                                  SizedBox(height: 16),
-                                  CustomFilePicker(
-                                      label: "Auxiliary custom model directory",
-                                      name: "aux_model_root",
-                                      isDirectoryPicker: true),
-                                  SizedBox(height: 16),
-                                  Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 0, vertical: 12),
-                                      child: EnabledButton(
-                                          isDisabled: !canUserAdvance,
-                                          disabledText:
-                                              'Complete the necessary steps',
-                                          child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                // Expanded(child: Text('Start conversation')),
-                                                Center(
-                                                    child: Text(
-                                                        'Start conversation',
-                                                        style: TextStyle(
-                                                            fontSize:
-                                                                btnFontSize,
-                                                            color:
-                                                                btnTextColor))),
-                                                Padding(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
+                            child: Column(children: [
+                              Row(children: [
+                                Expanded(
+                                    child: Text(
+                                        'Advanced model & storage settings',
+                                        style: TextStyle(
+                                            fontSize: btnFontSize,
+                                            color: Colors.blue))),
+                                const Icon(Icons.app_settings_alt,
+                                    size: 32, color: Colors.grey)
+                              ]),
+                              separator,
+                              CustomFilePicker(
+                                  initialValue: hhh_dir,
+                                  label: "HandHeld Helper root directory",
+                                  name: "hhh_root",
+                                  isDirectoryPicker: true),
+                              separator,
+                              CustomFilePicker(
+                                  initialValue: isMobile()
+                                      ? "__%DOWNLOADS"
+                                      : user_home_dir,
+                                  label: "Custom default LLM file (GGUF)",
+                                  name: "custom_default_model",
+                                  isDirectoryPicker: false),
+                              separator,
+                              CustomFilePicker(
+                                  label:
+                                      "(Optional) Auxiliary custom model directory",
+                                  name: "aux_model_root",
+                                  isDirectoryPicker: true,
+                                  // allowedExtensions: const ["gguf", "GGUF"],
+                                  errTextColor: Colors.yellowAccent.shade700,
+                                  errBgColor: Colors.white54,
+                                  errBgBtnColor: Colors.black12),
+                              separator,
+                              Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 0, vertical: 12),
+                                  child: EnabledButton(
+                                      onPressed: () {
+                                        if (_validRootAppParams != null) {
+                                          Timer(
+                                              const Duration(milliseconds: 500),
+                                              () {
+                                            print(
+                                                "COMPLETING ADVANCED APP SETUP WITH PARAMS=${_validRootAppParams!.toJson()}");
+                                            widget.onSetupComplete(
+                                                _validRootAppParams!);
+                                          });
+                                        }
+                                      },
+                                      isDisabled: !canUserAdvance,
+                                      disabledText: _advanced_form_errors
+                                              .isEmpty
+                                          ? 'Complete the necessary steps'
+                                          : _advanced_form_errors.join(", "),
+                                      child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Center(
+                                                child: Text(
+                                                    'Start conversation',
+                                                    style: TextStyle(
+                                                        fontSize: btnFontSize,
+                                                        color: canUserAdvance
+                                                            ? Colors
+                                                                .lightGreenAccent
+                                                            : Colors.grey))),
+                                            Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
                                                         horizontal: 8.0,
                                                         vertical: 0.0),
-                                                    child: Icon(Icons.chat,
-                                                        color: btnTextColor))
-                                              ])))
-                                ])),
-                          )),
-                    ]))));
+                                                child: Icon(Icons.chat,
+                                                    color: canUserAdvance
+                                                        ? Colors
+                                                            .lightGreenAccent
+                                                        : Colors.grey))
+                                          ])))
+                            ])),
+                      )),
+                ]))));
   }
 }
 
@@ -2948,6 +3167,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildDrawer(context),
+      resizeToAvoidBottomInset: isMobile(),
       appBar: AppBar(
           leading: IconButton(
             color: iconEnabledColor,
@@ -3316,245 +3536,6 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
-// class SearchResultBubble extends StatefulWidget {
-//   final String searchQuery;
-//   final String text;
-//   final Color highlightColor;
-//   final int maxNLines;
-//   final Color backgroundColor;
-//   final Color textColor;
-//   final double textSize;
-//   final Color hoverColor;
-//
-//   const SearchResultBubble({
-//     Key? key,
-//     required this.searchQuery,
-//     required this.text,
-//     this.highlightColor = Colors.yellow,
-//     this.maxNLines = 5,
-//     this.backgroundColor = Colors.white,
-//     this.textColor = Colors.black,
-//     this.textSize = 14.0,
-//     this.hoverColor = Colors.grey,
-//   }) : super(key: key);
-//
-//   @override
-//   _SearchResultBubbleState createState() => _SearchResultBubbleState();
-// }
-//
-// class _SearchResultBubbleState extends State<SearchResultBubble> {
-//   String? _highlightedText;
-//
-//   @override
-//   void initState() {
-//     super.initState();
-//     _highlightText();
-//   }
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return InkWell(
-//       onTap: () {},
-//       child: Container(
-//         padding: EdgeInsets.symmetric(
-//           vertical: 8.0,
-//           horizontal: MediaQuery.of(context).size.width * 0.1,
-//         ),
-//         decoration: BoxDecoration(
-//           color: widget.backgroundColor,
-//           borderRadius: BorderRadius.circular(16.0),
-//         ),
-//         child: Column(
-//           crossAxisAlignment: CrossAxisAlignment.start,
-//           children: [
-//             Text(
-//               _highlightedText ?? "",
-//               style: TextStyle(
-//                 color: widget.textColor,
-//                 fontSize: widget.textSize,
-//               ),
-//             ),
-//             if (widget.maxNLines > 1) SizedBox(height: 4.0),
-//             ...List.generate(
-//               widget.maxNLines - 1,
-//               (index) => Text(
-//                 '...',
-//                 style: TextStyle(
-//                   color: widget.textColor,
-//                   fontSize: widget.textSize,
-//                 ),
-//               ),
-//             )
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-//
-//   void _highlightText() {
-//     final RegExp regex = RegExp(widget.searchQuery, caseSensitive: false);
-//     setState(() {
-//       _highlightedText = widget.searchQuery;
-//       if (regex.hasMatch(_highlightedText!)) {
-//         _highlightedText = _highlightedText!.replaceAll(
-//           regex.firstMatch(),
-//           '<b style="color: ${widget.highlightColor}">${regex.firstMatch()}</b>',
-//         );
-//       }
-//     });
-//   }
-// }
-//
-// class _SearchResultBubble2State extends State<SearchResultBubble2> {
-//   Color _backgroundColor;
-//
-//   @override
-//   void initState() {
-//     super.initState();
-//     _backgroundColor = widget.backgroundColor;
-//   }
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return GestureDetector(
-//       onTap: widget.onTap,
-//       onTapDown: (_) => setState(() => _backgroundColor = widget.hoverColor),
-//       onTapUp: (_) => setState(() => _backgroundColor = widget.backgroundColor),
-//       onTapCancel: () =>
-//           setState(() => _backgroundColor = widget.backgroundColor),
-//       child: Container(
-//         padding: widget.padding,
-//         decoration: BoxDecoration(
-//           color: _backgroundColor,
-//           borderRadius: BorderRadius.circular(16.0),
-//         ),
-//         child: SelectableText(
-//           widget.documentText
-//               .replaceAll(widget.searchQuery, '**${widget.searchQuery}**'),
-//           style: TextStyle(
-//             color: widget.textColor,
-//             fontSize: 16.0,
-//           ),
-//           onTap: () {},
-//           selectionControls: MaterialSelectionControls(),
-//           selectionColor: widget.highlightColor,
-//           maxLines: widget.maxLines,
-//           overflow: TextOverflow.ellipsis,
-//         ),
-//       ),
-//     );
-//   }
-// }
-//
-// class SearchMessagesWidget extends StatefulWidget {
-//   final ChatManager _chatManager;
-//
-//   SearchMessagesWidget(this._chatManager);
-//
-//   @override
-//   _SearchMessagesWidgetState createState() => _SearchMessagesWidgetState();
-// }
-//
-// class _SearchMessagesWidgetState extends State<SearchMessagesWidget> {
-//   TextEditingController _searchController = TextEditingController();
-//   FocusNode _searchFocusNode = FocusNode();
-//   Timer? _debounce;
-//   String _searchQuery = '';
-//   bool _isLoading = false;
-//   List<(Chat, Message)> _searchResults = [];
-//
-//   @override
-//   void initState() {
-//     super.initState();
-//     _searchFocusNode.addListener(_onSearchFocusChange);
-//   }
-//
-//   @override
-//   void dispose() {
-//     _searchController.dispose();
-//     _searchFocusNode.dispose();
-//     super.dispose();
-//   }
-//
-//   void _onSearchFocusChange() {
-//     setState(() {
-//       if (_searchFocusNode.hasFocus) {
-//         _searchQuery = _searchController.text;
-//         if (_debounce?.isActive ?? false) _debounce!.cancel();
-//         _debounce = Timer(const Duration(milliseconds: 300), () async {
-//           setState(() => _isLoading = true);
-//           final results = await widget._chatManager
-//               .searchMessages(_searchQuery, prefixQuery: true);
-//           setState(() {
-//             _searchResults = results;
-//             _isLoading = false;
-//           });
-//         });
-//       }
-//     });
-//   }
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//           title: TextField(
-//               controller: _searchController, focusNode: _searchFocusNode)),
-//       body: Column(children: [
-//         if (_isLoading) const Center(child: CircularProgressIndicator()),
-//         Expanded(
-//           child: ListView.builder(
-//             itemCount: _searchResults.length + 1, // +1 for "No results" message
-//             itemBuilder: (BuildContext context, int index) {
-//               if (index == _searchResults.length) {
-//                 return const ListTile(title: Text("No results"));
-//               } else {
-//                 final Chat chat = _searchResults[index].item1;
-//                 final Message message = _searchResults[index].item2;
-//                 return ListTile(
-//                     title:
-//                         Text(_chatMessagePreview(_searchQuery, chat, message)),
-//                     onTap: () async {
-//                       final chatId = chat.uuid;
-//                       final messageId = message.uuid;
-//                       final chat = await widget._chatManager.getChat(chatId);
-//                       final messages =
-//                           await widget._chatManager.getMessagesFromChat(chatId);
-//                       if (chat != null && messages.isNotEmpty) {
-//                         Navigator.of(context)
-//                             .push(_createChatViewRoute(chat, messages));
-//                       }
-//                     });
-//               }
-//             },
-//           ),
-//         )
-//       ]),
-//     );
-//   }
-//
-//   Route _createChatViewRoute(Chat chat, List<Message> messages) {
-//     return PageRouteBuilder(
-//         pageBuilder: (context, animation, secondaryAnimation) =>
-//             ChatView(chat, messages),
-//         transitionsBuilder: (context, animation, secondaryAnimation, child) =>
-//             FadeTransition(opacity: animation, child: child),
-//         transitionDuration: const Duration(milliseconds: 400));
-//   }
-//
-//   String _chatMessagePreview(String searchQuery, Chat chat, Message message) {
-//     final chatTitle = chat.title ??
-//         'Chat from ${DateTime.fromMillisecondsSinceEpoch(chat.date * 1000)}';
-//     final messageText = message.message;
-//     final queryHighlightStart = messageText.indexOf(searchQuery);
-//     final queryHighlightEnd = queryHighlightStart + searchQuery.length;
-//     final chatNameAndTime =
-//         '[$chatTitle] ${DateTime.fromMillisecondsSinceEpoch(message.date * 1000)}';
-//     return '$chatNameAndTime\n$messageText\n'.replaceRange(queryHighlightStart,
-//         queryHighlightEnd, '<highlight>$searchQuery</highlight>', 0);
-//   }
-// }
-
 class LifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -3832,21 +3813,6 @@ class _PseudoRouter extends State<PseudoRouter> {
     }
 
     return currentPage;
-    // return PageRouteBuilder(
-    //   pageBuilder: (context, animation, secondaryAnimation) => currentPage,
-    //   transitionsBuilder: (context, animation, secondaryAnimation, child) {
-    //     // Add your custom transition here
-    //     var begin = Offset(0.0, 1.0);
-    //     var end = Offset.zero;
-    //     var curve = Curves.ease;
-    //     var tween =
-    //         Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-    //     return SlideTransition(
-    //       position: animation.drive(tween),
-    //       child: child,
-    //     );
-    //   },
-    // ).pageBuilder(context);
   }
 }
 

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 bool isMobile() => Platform.isAndroid;
 bool isDevelopment() =>
     const String.fromEnvironment("DEVELOPMENT", defaultValue: "").isNotEmpty;
+void Function(Object?) dlog = (Object? args) {};
 
 String capitalizeAllWord(String value) {
   var result = value[0].toUpperCase();
@@ -68,4 +69,46 @@ String humanReadableDate(DateTime date) {
   }
 
   return heading;
+}
+
+Future<bool> directoryExistsAndWritable(String path) async {
+  final directory = Directory(path);
+
+  // Check if directory exists
+  bool exists = await directory.exists();
+  if (!exists) {
+    return false;
+  }
+
+  // Check if the app process can create and delete a temp file in it
+  final tempFile = File('${directory.path}/._tempfile_perm_check');
+  try {
+    await tempFile.create();
+    await tempFile.delete();
+  } catch (e) {
+    return false;
+  }
+
+  return true;
+}
+
+bool directoryExistsAndWritableSync(String path) {
+  final directory = Directory(path);
+
+  // Check if directory exists
+  bool exists = directory.existsSync();
+  if (!exists) {
+    return false;
+  }
+
+  // Check if the app process can create and delete a temp file in it
+  final tempFile = File('${directory.path}/._tempfile_perm_check');
+  try {
+    tempFile.createSync();
+    tempFile.deleteSync();
+  } catch (e) {
+    return false;
+  }
+
+  return true;
 }

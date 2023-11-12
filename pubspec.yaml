@@ -63,6 +63,7 @@ dependencies:
   disk_space_plus: ^0.2.3
   desktop_disk_space: ^0.0.1
   background_downloader: ^7.12.3
+  filesystem_picker: ^4.0.0
 
 dev_dependencies:
   ffigen: ^9.0.1
