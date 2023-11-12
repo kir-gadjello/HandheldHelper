@@ -52,6 +52,16 @@ final APPROVED_LLMS = [
   ])
 ];
 
+void Function(AppPage page,
+    {VoidCallback? onBeforeNavigate,
+    List<String>? parameters}) getNavigate(BuildContext context) {
+  final navigationProvider = NavigationProvider.of(context);
+  return navigationProvider?.navigate ??
+      (AppPage page,
+              {VoidCallback? onBeforeNavigate, List<String>? parameters}) =>
+          {};
+}
+
 class SystemInfo {
   int RAM;
   double freeDisk;
@@ -2190,6 +2200,19 @@ LLMEngine llm = LLMEngine();
 //   abort() {}
 // }
 
+showSnackBarTop(BuildContext context, String msg, {int delay = 750}) {
+  var snackBar = SnackBar(
+      duration: Duration(milliseconds: delay),
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 96),
+      content: Text(msg),
+      dismissDirection: DismissDirection.none);
+
+  // Find the ScaffoldMessenger in the widget tree
+  // and use it to show a SnackBar.
+  ScaffoldMessenger.of(context).showSnackBar(snackBar);
+}
+
 void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
   if (flags?.containsKey("_canceled_by_user") ?? false) {
     ret.customBackgroundColor = Colors.orange.shade600;
@@ -2908,23 +2931,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  showSnackBarTop(String msg, {int delay = 750}) {
-    var snackBar = SnackBar(
-        duration: Duration(milliseconds: delay),
-        behavior: SnackBarBehavior.floating,
-        margin:
-            EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 96),
-        content: Text(msg),
-        dismissDirection: DismissDirection.none);
-
-    // Find the ScaffoldMessenger in the widget tree
-    // and use it to show a SnackBar.
-    ScaffoldMessenger.of(context).showSnackBar(snackBar);
-  }
-
   executeChatShare() {
     FlutterClipboard.copy(msgs_toJson());
-    showSnackBarTop('Conversation copied to clipboard');
+    showSnackBarTop(context, 'Conversation copied to clipboard');
   }
 
   reset_current_chat() async {
@@ -3115,7 +3124,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               onLongPressMessage: (m) {
                 String msg = "${m.user.getFullName()}: ${m.text}";
                 FlutterClipboard.copy(msg);
-                showSnackBarTop(
+                showSnackBarTop(context,
                     "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
               }),
           currentUser: user,
@@ -3283,6 +3292,32 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 }
 
+String limitText(String text, int max_out_len,
+    {bool ellipsis = true, int? max_n_lines}) {
+  int start = 0;
+  int end = max_out_len;
+
+  if (end > text.length) {
+    end = text.length;
+  }
+
+  String limitedText = text.substring(start, end);
+
+  if (max_n_lines != null) {
+    var lines = limitedText.split('\n');
+    int linesCount = lines.length;
+    if (linesCount > max_n_lines) {
+      limitedText = lines.sublist(0, max_n_lines).join('\n');
+    }
+  }
+
+  if (ellipsis && end < text.length) {
+    limitedText += '...';
+  }
+
+  return limitedText;
+}
+
 RichText highlightSearchResult(
     String text, String query, int max_out_len, Color highlight_color,
     {bool matchCase = false, ellipsis = true, int? max_n_lines}) {
@@ -3326,12 +3361,12 @@ RichText highlightSearchResult(
     text: TextSpan(
       children: [
         if (ellipsis && start > 0) const TextSpan(text: "..."),
-        TextSpan(text: before),
+        if (before.trim().isNotEmpty) TextSpan(text: before),
         TextSpan(
           text: match,
           style: TextStyle(backgroundColor: highlight_color),
         ),
-        TextSpan(text: after),
+        if (after.trim().isNotEmpty) TextSpan(text: after),
         if (ellipsis && end < text.length) const TextSpan(text: "..."),
       ],
     ),
@@ -3400,19 +3435,37 @@ class _SearchPageState extends State<SearchPage> {
       future: _searchResults,
       builder: (BuildContext context,
           AsyncSnapshot<List<(Chat, List<Message>)>> snapshot) {
+        var navigate = getNavigate(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
           return hhhLoader(context);
         } else if (snapshot.hasError) {
           return Text('Error: ${snapshot.error}');
         } else {
+          var highlight = Theme.of(context).colorScheme.primary;
+
+          Widget search_result_preprocessor(String s) => highlightSearchResult(
+              s, _query!, SEARCH_MAX_SNIPPET_LENGTH, highlight,
+              max_n_lines: 4);
+
           return Padding(
               padding:
                   const EdgeInsets.symmetric(vertical: 2.0, horizontal: 0.0),
               child: ListView.builder(
                 itemCount: snapshot?.data?.length ?? 0,
                 itemBuilder: (context, index) {
-                  final (chat, messages) = snapshot.data![index];
-                  return _buildSearchResultItem(chat, messages);
+                  var (chat, messages) = snapshot.data![index];
+                  return buildListOfChatsWithMessages(
+                      context,
+                      chat,
+                      messages.isNotEmpty
+                          ? messages
+                          : [
+                              Message.placeholder(
+                                  "system", "<conversation is empty>")
+                            ], onChatTap: (Uuid chatId) {
+                    navigate(AppPage.chathistory,
+                        parameters: [chatId.toString()]);
+                  }, preprocessMessage: search_result_preprocessor);
                 },
               ));
         }
@@ -3420,7 +3473,10 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _buildSearchResultItem(Chat chat, List<Message> messages) {
+  Widget _buildSearchResultItem(
+      BuildContext context, Chat chat, List<Message> messages) {
+    final navigate = getNavigate(context);
+
     var highlight = Theme.of(context).colorScheme.primary;
     var bgColor = Theme.of(context).listTileTheme.tileColor!;
     var bg2Color = bgColor.lighter(30);
@@ -3506,6 +3562,7 @@ class _SearchPageState extends State<SearchPage> {
                 Text(chat.getHeading(), style: const TextStyle(fontSize: 22)),
             onTap: () {
               // Callback with relevant chatId and messageId
+              navigate(AppPage.chathistory, parameters: [chat.uuid.toString()]);
             },
           ),
         ));
@@ -3532,6 +3589,369 @@ class _SearchPageState extends State<SearchPage> {
         ),
       ),
       body: _buildSearchResults(),
+    );
+  }
+}
+
+Widget buildDashChatHistory(BuildContext context, List<ChatMessage> messages) {
+  var activeColor = Theme.of(context).primaryColor;
+  var aiMsgColor = Theme.of(context).listTileTheme.tileColor;
+  var userMsgColor = Theme.of(context).listTileTheme.selectedTileColor;
+  var textColor = Theme.of(context).listTileTheme.textColor;
+  var hintColor = Theme.of(context).hintColor;
+
+  return DashChat(
+    inputOptions: InputOptions(
+        sendOnEnter: false,
+        sendOnShiftEnter: true,
+        alwaysShowSend: true,
+        inputToolbarMargin: const EdgeInsets.all(0.0),
+        inputToolbarPadding: const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
+        inputMaxLines: 15,
+        sendButtonBuilder: (Function fct) => InkWell(
+              onTap: () => fct(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                child: Stack(children: [
+                  Icon(
+                    size: 40,
+                    Icons.send,
+                    color: hintColor,
+                  ),
+                ]),
+              ),
+            ),
+        inputDecoration: InputDecoration(
+          isDense: true,
+          hintText:
+              "Read-only historical chat view. Use context menu to continue.",
+          hintStyle: TextStyle(color: hintColor),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding: const EdgeInsets.only(
+            left: 18,
+            top: 10,
+            bottom: 10,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12.0),
+            borderSide: const BorderSide(
+              width: 0,
+              style: BorderStyle.none,
+            ),
+          ),
+        ),
+        inputToolbarStyle:
+            BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
+        inputDisabled: true),
+    messageOptions: MessageOptions(
+        fullWidthRow: true, // || isMobile(),
+        containerColor: aiMsgColor!,
+        currentUserContainerColor: userMsgColor!,
+        textColor: textColor!,
+        currentUserTextColor: textColor!,
+        messageTextBuilder: customMessageTextBuilder,
+        showCurrentUserAvatar: false,
+        showOtherUsersAvatar: false,
+        onLongPressMessage: (m) {
+          String msg = "${m.user.getFullName()}: ${m.text}";
+          FlutterClipboard.copy(msg);
+          showSnackBarTop(context,
+              "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
+        }),
+    onSend: (value) {},
+    currentUser: user,
+    messages: messages,
+  );
+}
+
+class SingleChatHistoryPage extends StatefulWidget {
+  final String? chatId;
+  SingleChatHistoryPage({this.chatId});
+
+  @override
+  _SingleChatHistoryPageState createState() => _SingleChatHistoryPageState();
+}
+
+class _SingleChatHistoryPageState extends State<SingleChatHistoryPage> {
+  final ChatManager _chatManager = ChatManager();
+  Future<List<Message>>? _chatHistory;
+  List<ChatMessage>? _chatMessages;
+  Uuid? _chatUuid;
+  Chat? _chat;
+
+  @override
+  void initState() {
+    super.initState();
+    loadData();
+  }
+
+  void loadData() async {
+    if (widget.chatId != null) {
+      print("Chat History: ${widget.chatId}");
+      _chatUuid = Uuid.fromString(widget.chatId!);
+      _chat = await _chatManager.getChat(_chatUuid!);
+      _chatHistory =
+          _chatManager.getMessagesFromChat(_chatUuid!, reversed: true);
+      _chatHistory?.then((value) {
+        _chatMessages = dbMsgsToDashChatMsgs(value);
+        setState(() {});
+      });
+      setState(() {});
+    }
+  }
+
+  Widget _buildChatHistory() {
+    return FutureBuilder<List<Message>>(
+      future: _chatHistory,
+      builder: (BuildContext context, AsyncSnapshot<List<Message>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return CircularProgressIndicator();
+        } else if (snapshot.hasError) {
+          return Text('Error: ${snapshot.error}');
+        } else if (_chat != null && _chatMessages != null) {
+          return buildDashChatHistory(context, _chatMessages!);
+        }
+        return CircularProgressIndicator();
+      },
+    );
+  }
+
+  Widget _buildChatBubble(Message message) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+      child: Material(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: ListTile(
+          tileColor: message.username == "user"
+              ? getUserMsgColor(context)
+              : getAIMsgColor(context),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          minVerticalPadding: 2.0,
+          textColor: Theme.of(context).listTileTheme.textColor,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+          title: Container(child: Text(message.message)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      drawer: _buildDrawer(context),
+      appBar: AppBar(
+        title: _chat == null
+            ? Text('Loading chat history...')
+            : Text("History of ${_chat!.getHeading()}"),
+      ),
+      body: _buildChatHistory(),
+    );
+  }
+}
+
+Widget nop_preprocessor(String m) => Text(m);
+
+// highlightSearchResult(m.message, _query!,
+//     SEARCH_MAX_SNIPPET_LENGTH, highlight,
+//     max_n_lines: 4))
+//
+// highlightSearchResult(messages[0].message, _query!,
+// SEARCH_MAX_SNIPPET_LENGTH, highlight,
+// max_n_lines: 4))
+
+Widget buildListOfChatsWithMessages(
+    BuildContext context, Chat chat, List<Message> messages,
+    {Widget Function(String) preprocessMessage = nop_preprocessor,
+    Function(Uuid)? onChatTap,
+    Function(Uuid, Uuid)? onMessageTap}) {
+  var highlight = Theme.of(context).colorScheme.primary;
+  var bgColor = Theme.of(context).listTileTheme.tileColor!;
+  var bg2Color = bgColor.lighter(30);
+  var textColor = Theme.of(context).listTileTheme.textColor;
+
+  var lighterBgColor = bgColor.lighter(5);
+  var chatTileColor = lighterBgColor.darker(8);
+
+  Widget msgs;
+
+  const br = 10.0;
+
+  const userBorder = BorderRadius.only(
+    topLeft: Radius.circular(br),
+    topRight: Radius.circular(br),
+    bottomLeft: Radius.circular(br),
+    // bottomRight: Radius.circular(18),
+  );
+
+  const aiBorder = BorderRadius.only(
+    topLeft: Radius.circular(br),
+    topRight: Radius.circular(br),
+    // bottomLeft: Radius.circular(br),
+    bottomRight: Radius.circular(br),
+  );
+
+  if (messages.length > 1) {
+    msgs = Column(
+        children: messages.map((m) {
+      var isOwn = m.username == "user";
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+        child: Material(
+          shape: RoundedRectangleBorder(
+              borderRadius: isOwn ? userBorder : aiBorder),
+          child: ListTile(
+            tileColor:
+                isOwn ? getUserMsgColor(context) : getAIMsgColor(context),
+            shape: RoundedRectangleBorder(
+                borderRadius: isOwn ? userBorder : aiBorder),
+            minVerticalPadding: 2.0,
+            textColor: textColor,
+            contentPadding:
+                const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+            title: Container(child: preprocessMessage(m.message)),
+            onTap: () {
+              if (onMessageTap != null) {
+                onMessageTap(m.uuid, m.chatUuid);
+              } else if (onChatTap != null) {
+                onChatTap(m.chatUuid);
+              }
+            },
+          ),
+        ),
+      );
+    }).toList());
+  } else if (messages.isNotEmpty) {
+    msgs = ListTile(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      minVerticalPadding: 2.0,
+      tileColor: bg2Color,
+      textColor: textColor,
+      contentPadding:
+          const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+      title: Container(child: preprocessMessage(messages[0].message)),
+      onTap: () {
+        var m = messages[0];
+        if (onMessageTap != null) {
+          onMessageTap(m.uuid, m.chatUuid);
+        } else if (onChatTap != null) {
+          onChatTap(m.chatUuid);
+        }
+      },
+    );
+  } else {
+    msgs = ListTile(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      minVerticalPadding: 2.0,
+      tileColor: bg2Color,
+      textColor: textColor,
+      contentPadding:
+          const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+      title: Row(children: [
+        const SizedBox(width: 5),
+        Icon(
+          Icons.warning,
+          size: 22,
+          color: textColor,
+        ),
+        const SizedBox(width: 5),
+        const Text("No messages found")
+      ]),
+    );
+  }
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+    child: Container(
+      constraints: isMobile()
+          ? null
+          : BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.33,
+            ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: chatTileColor, width: 2),
+      ),
+      child: ListTile(
+        tileColor: chatTileColor,
+        textColor: textColor,
+        minVerticalPadding: 2.0,
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+        subtitle: msgs,
+        title: Text(chat.getHeading(), style: const TextStyle(fontSize: 22)),
+        onTap: () {
+          // Callback with relevant chatId and messageId
+          if (onChatTap != null) {
+            onChatTap(chat.uuid);
+          }
+        },
+      ),
+    ),
+  );
+}
+
+class ChatHistoryPage extends StatefulWidget {
+  ChatHistoryPage({Key? key}) : super(key: key);
+
+  @override
+  _ChatHistoryPageState createState() => _ChatHistoryPageState();
+}
+
+class _ChatHistoryPageState extends State<ChatHistoryPage> {
+  final ChatManager _chatManager = ChatManager();
+  Future<List<(Chat, List<Message>)>>? _chats;
+
+  @override
+  void initState() {
+    super.initState();
+    _chats = _chatManager.getMessagesFromChats([], sort_chats: true, limit: 3);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final navigate = getNavigate(context);
+    return Scaffold(
+      drawer: _buildDrawer(context),
+      appBar: AppBar(
+        title: const Text('History of conversations'),
+      ),
+      body: FutureBuilder<List<(Chat, List<Message>)>>(
+        future: _chats,
+        builder: (BuildContext context,
+            AsyncSnapshot<List<(Chat, List<Message>)>> snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return hhhLoader(context);
+          } else if (snapshot.hasError) {
+            return Text('Error: ${snapshot.error}');
+          } else {
+            return ListView.builder(
+              itemCount: snapshot.data?.length ?? 0,
+              itemBuilder: (context, index) {
+                var (chat, messages) = snapshot.data![index];
+                return buildListOfChatsWithMessages(
+                    context,
+                    chat,
+                    messages.isNotEmpty
+                        ? messages.sublist(1)
+                        : [
+                            Message.placeholder(
+                                "system", "<conversation is empty>")
+                          ],
+                    onChatTap: (Uuid chatId) {
+                      navigate(AppPage.chathistory,
+                          parameters: [chatId.toString()]);
+                    },
+                    preprocessMessage: (m) =>
+                        Text(limitText(m, 512, max_n_lines: 5)));
+              },
+            );
+          }
+        },
+      ),
     );
   }
 }
@@ -3567,9 +3987,11 @@ enum AppPage {
   conversation,
   settings,
   search,
+  chathistory,
   history,
   models,
   help,
+  generic_error
 }
 
 String getPageName(AppPage page, {capitalize = false}) => capitalize
@@ -3739,7 +4161,8 @@ Drawer _buildDrawer(BuildContext context) {
 
 class NavigationProvider extends InheritedWidget {
   final VoidCallback? onBeforeNavigate;
-  Function(AppPage)? navigate;
+  Function(AppPage, {VoidCallback? onBeforeNavigate, List<String>? parameters})?
+      navigate;
 
   NavigationProvider({
     required Widget child,
@@ -3768,18 +4191,31 @@ class PseudoRouter extends StatefulWidget {
 
 class _PseudoRouter extends State<PseudoRouter> {
   AppPage _currentPage = AppPage.conversation;
+  List<String> _parameters = [];
+  List<AppPage> _pageStack = [AppPage.conversation];
 
-  void navigate(AppPage page, {VoidCallback? onBeforeNavigate}) {
+  void navigate(AppPage page,
+      {VoidCallback? onBeforeNavigate, List<String>? parameters}) {
     try {
       if (onBeforeNavigate != null) {
         onBeforeNavigate();
       }
       setState(() {
-        global_current_page = page;
+        _parameters = parameters ?? [];
+        _pageStack.add(page);
         _currentPage = page;
       });
     } catch (e) {
       print('Navigation error: $e');
+    }
+  }
+
+  void back() {
+    if (_pageStack.length > 1) {
+      setState(() {
+        _pageStack.removeLast();
+        _currentPage = _pageStack.last;
+      });
     }
   }
 
@@ -3792,7 +4228,7 @@ class _PseudoRouter extends State<PseudoRouter> {
   }
 
   Widget _buildPage(AppPage page) {
-    Widget currentPage;
+    Widget currentPage = const Text("");
 
     switch (page) {
       case AppPage.conversation:
@@ -3803,11 +4239,23 @@ class _PseudoRouter extends State<PseudoRouter> {
       case AppPage.search:
         currentPage = SearchPage();
       case AppPage.history:
-        currentPage = UnderConstructionWidget();
+        currentPage = ChatHistoryPage();
+      case AppPage.chathistory:
+        var chatId = _parameters.elementAtOrNull(0);
+        if (chatId != null) {
+          currentPage = SingleChatHistoryPage(chatId: chatId);
+        } else {
+          navigate(AppPage.generic_error,
+              parameters: ["Wrong navigation route"]);
+        }
       case AppPage.help:
         currentPage = UnderConstructionWidget();
       case AppPage.models:
         currentPage = UnderConstructionWidget();
+      case AppPage.generic_error:
+        currentPage = UnderConstructionWidget(
+            message:
+                "Wrong navigation route, this is a bug in the application.\nReturn to the relevant route by using the hamburger menu.");
       default:
         currentPage = UnderConstructionWidget(message: "Unknown page");
     }

@@ -180,6 +180,14 @@ class Uuid {
         .join('')
         .toUpperCase();
   }
+
+  factory Uuid.fromString(String uuid) {
+    final bytes = <int>[];
+    for (var i = 0; i < uuid.length; i += 2) {
+      bytes.add(int.parse(uuid.substring(i, i + 2), radix: 16));
+    }
+    return Uuid(bytes);
+  }
 }
 
 Future<void> createFtsIndex(
@@ -304,6 +312,17 @@ class Message {
       clientUuid: parent.clientUuid,
       chatUuid: parent.uuid,
       meta: meta ?? {},
+    );
+  }
+
+  factory Message.placeholder(String username, String message) {
+    return Message(
+      date: getUnixTime(),
+      username: username,
+      messageIndex: 1,
+      message: message,
+      clientUuid: Uuid.generate(),
+      chatUuid: Uuid.generate(),
     );
   }
 
@@ -812,20 +831,90 @@ class ChatManager {
     SELECT * FROM chats WHERE uuid IN ($placeholder)
   ''', List.from(chatUuids.map((c) => c.toBytes())));
 
-    return results.map((result) => Chat.fromJson(result)).toList();
+    Map<Uuid, Chat> chats = {};
+    for (var c in results) {
+      var chat = Chat.fromJson(c);
+      chats[chat.uuid] = chat;
+    }
+
+    List<Chat> ret = [];
+    for (var u in chatUuids) {
+      if (chats.containsKey(u)) {
+        ret.add(chats[u]!);
+      }
+    }
+
+    return ret;
+  }
+
+  Future<List<Message>> getMessagesFromChatS(String chatId,
+      {reversed = false}) async {
+    return getMessagesFromChat(Uuid.fromString(chatId), reversed: reversed);
+  }
+
+  Future<List<(Chat, List<Message>)>> getMessagesFromChats(List<Uuid> chats,
+      {sort_chats = false,
+      sort_reversed = false,
+      msgs_reversed = false,
+      int? limit}) async {
+    final db = await _databaseHelper.database;
+
+    Map<Uuid, Chat> chatsByUuid = {};
+
+    List<Uuid> _chats = [];
+
+    var allChats = chats.isEmpty ? await getAllChats() : await getChats(chats);
+
+    if (sort_chats) {
+      allChats.sort((Chat a, Chat b) =>
+          sort_reversed ? b.date - a.date : a.date - b.date);
+    }
+
+    for (var c in allChats) {
+      chatsByUuid[c.uuid] = c;
+      _chats.add(c.uuid);
+    }
+
+    List<(Chat, List<Message>)> chatMessages = [];
+
+    for (Uuid chatId in _chats) {
+      var ordering = msgs_reversed ? "DESC" : "ASC";
+      var query = '''
+      SELECT * FROM messages WHERE chat_uuid = ? ORDER BY message_index $ordering
+    ''';
+      query += (limit != null) ? " LIMIT ?;" : ";";
+
+      List<dynamic> args = [chatId.toBytes()];
+      if (limit != null) {
+        args.add(limit);
+      }
+
+      final List<Map<String, dynamic>> results = await db.rawQuery(query, args);
+
+      List<Message> messages =
+          results.map((result) => Message.fromJson(result)).toList();
+
+      chatMessages.add((chatsByUuid[chatId]!, messages));
+    }
+
+    return chatMessages;
   }
 
   Future<List<Message>> getMessagesFromChat(Uuid chatId,
-      {reversed = false}) async {
+      {reversed = false, int? limit}) async {
     final db = await _databaseHelper.database;
 
     var ordering = reversed ? "DESC" : "ASC";
 
     var query = '''
-    SELECT * FROM messages WHERE chat_uuid = ? ORDER BY message_index $ordering;
-  ''';
+    SELECT * FROM messages WHERE chat_uuid = ? ORDER BY message_index $ordering''';
 
-    var args = [chatId.toBytes()];
+    query += (limit != null) ? " LIMIT ?;" : ";";
+
+    List<dynamic> args = [chatId.toBytes()];
+    if (limit != null) {
+      args.add(limit);
+    }
 
     print("getMessages - $query , $args");
 

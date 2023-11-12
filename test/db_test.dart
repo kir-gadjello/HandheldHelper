@@ -170,6 +170,38 @@ void main() async {
       expect(chatsAndMessages3.length, 1);
       expect(chatsAndMessages3, everyElement(isA<(Chat, Message)>()));
     });
+
+    test('getMessagesFromChats retrieves messages from a list of chats',
+        () async {
+      for (var c in await chatManager.getAllChats()) {
+        chatManager.deleteChat(c.uuid);
+      }
+      // Create a new chat and add a message to it
+      var newChat = await chatManager.createChat(title: 'Test Chat 2');
+      var newMessage = await chatManager.addMessageToChat(
+          newChat.uuid, 'Test message 2', 'user');
+      var newMessage1 = await chatManager.addMessageToChat(
+          newChat.uuid, 'Test message 3', 'user');
+
+      var newChat2 = await chatManager.createChat(title: 'Test Chat 3');
+      var newMessage2 = await chatManager.addMessageToChat(
+          newChat2.uuid, 'Test message 4', 'user');
+
+      // Retrieve messages from the chats
+      var chatMessages = await chatManager
+          .getMessagesFromChats([newChat.uuid, newChat2.uuid], limit: 1);
+
+      // Check that messages were retrieved from both chats
+      expect(chatMessages, hasLength(2));
+      expect(chatMessages[0].$1.uuid, newChat.uuid);
+      expect(chatMessages[0].$2.map((m) => m.uuid), contains(newMessage!.uuid));
+      expect(chatMessages[0].$2.map((m) => m.uuid),
+          isNot(contains(newMessage1!.uuid)));
+
+      expect(chatMessages[1].$1.uuid, newChat2.uuid);
+      expect(
+          chatMessages[1].$2.map((m) => m.uuid), contains(newMessage2!.uuid));
+    });
   });
 
   group('MetadataManager', () {
