@@ -10,6 +10,7 @@ import 'package:intl/intl.dart' as intl;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart' as vp;
 import 'dart:async';
+import 'dart:io';
 
 import 'src/widgets/image_provider/image_provider.dart';
 

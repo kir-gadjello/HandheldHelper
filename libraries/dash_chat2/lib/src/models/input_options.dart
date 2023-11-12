@@ -15,6 +15,7 @@ class InputOptions {
     this.alwaysShowSend = false,
     this.sendOnEnter = false,
     this.sendOnShiftEnter = true,
+    this.newlineOnShiftEnter = false,
     this.textInputAction,
     this.maxInputLength,
     this.leading,
@@ -50,6 +51,7 @@ class InputOptions {
   /// Send the message when the user presses the enter key
   final bool sendOnEnter;
   final bool sendOnShiftEnter;
+  final bool newlineOnShiftEnter;
 
   /// Builder to create your own send button widget
   /// You can use defaultSendButton to only override some variables

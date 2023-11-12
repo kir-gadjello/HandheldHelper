@@ -29,6 +29,7 @@ class InputToolbarState extends State<InputToolbar>
   int currentMentionIndex = -1;
   String currentTrigger = '';
   late FocusNode focusNode;
+  bool _shiftPressed = false;
 
   @override
   void initState() {
@@ -41,6 +42,9 @@ class InputToolbarState extends State<InputToolbar>
       }
     });
     WidgetsBinding.instance.addObserver(this);
+    if (Platform.isMacOS || Platform.isLinux) {
+      ServicesBinding.instance.keyboard.addHandler(_onKey);
+    }
     super.initState();
   }
 
@@ -57,7 +61,45 @@ class InputToolbarState extends State<InputToolbar>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _clearOverlay();
+    if (Platform.isMacOS || Platform.isLinux) {
+      ServicesBinding.instance.keyboard.removeHandler(_onKey);
+    }
     super.dispose();
+  }
+
+  bool _onKey(KeyEvent event) {
+    final key = event.logicalKey.keyLabel;
+
+    if (event is KeyDownEvent) {
+      print("Key down: $key");
+      if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
+        _shiftPressed = true;
+      }
+    } else if (event is KeyUpEvent) {
+      print("Key up: $key");
+      if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
+        _shiftPressed = false;
+      }
+      if (_shiftPressed && event.logicalKey == LogicalKeyboardKey.enter) {
+        print("!!! SHIFT+ENTER");
+        if (widget.inputOptions.sendOnShiftEnter) {
+          _sendMessage(removeLastNewline: true);
+          return false;
+        } else if (widget.inputOptions.newlineOnShiftEnter) {
+          setState(() {
+            textController.text += '\n';
+          });
+          return false;
+        }
+      }
+    } else if (event is KeyRepeatEvent) {
+      print("Key repeat: $key");
+      if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
+        _shiftPressed = true;
+      }
+    }
+
+    return false;
   }
 
   @override
@@ -79,53 +121,46 @@ class InputToolbarState extends State<InputToolbar>
             Expanded(
               child: Directionality(
                 textDirection: widget.inputOptions.inputTextDirection,
-                // child: RawKeyboardListener(
-                //     focusNode: focusNode,
-                //     onKey: (RawKeyEvent event) {
-                //       if (widget.inputOptions.sendOnShiftEnter) {
-                //         if (event.isShiftPressed &&
-                //             event.logicalKey == LogicalKeyboardKey.enter) {
-                //           setState(() {});
-                //           _sendMessage();
-                //         }
-                //       }
-                //     },
-                    child: TextField(
-                      focusNode: focusNode,
-                      controller: textController,
-                      enabled: !widget.inputOptions.inputDisabled,
-                      textCapitalization:
-                          widget.inputOptions.textCapitalization,
-                      textInputAction: widget.inputOptions.textInputAction,
-                      decoration: widget.inputOptions.inputDecoration ??
-                          defaultInputDecoration(),
-                      maxLength: widget.inputOptions.maxInputLength,
-                      minLines: 1,
-                      maxLines: widget.inputOptions.sendOnEnter
-                          ? 1
-                          : widget.inputOptions.inputMaxLines,
-                      cursorColor: widget.inputOptions.cursorStyle.color,
-                      cursorWidth: widget.inputOptions.cursorStyle.width,
-                      showCursor: !widget.inputOptions.cursorStyle.hide,
-                      style: widget.inputOptions.inputTextStyle,
-                      onSubmitted: (String value) {
-                        if (widget.inputOptions.sendOnEnter) {
-                          _sendMessage();
-                        }
-                      },
-                      onChanged: (String value) async {
-                        setState(() {});
-                        if (widget.inputOptions.onTextChange != null) {
-                          widget.inputOptions.onTextChange!(value);
-                        }
-                        WidgetsBinding.instance.addPostFrameCallback((_) async {
-                          if (widget.inputOptions.onMention != null) {
-                            await _checkMentions(value);
-                          }
-                        });
-                      },
-                      autocorrect: widget.inputOptions.autocorrect,
-                    ),
+                child: TextField(
+                  focusNode: focusNode,
+                  controller: textController,
+                  enabled: !widget.inputOptions.inputDisabled,
+                  textCapitalization: widget.inputOptions.textCapitalization,
+                  textInputAction: widget.inputOptions.textInputAction,
+                  decoration: widget.inputOptions.inputDecoration ??
+                      defaultInputDecoration(),
+                  maxLength: widget.inputOptions.maxInputLength,
+                  minLines: 1,
+                  maxLines: widget.inputOptions.sendOnEnter
+                      ? 1
+                      : widget.inputOptions.inputMaxLines,
+                  cursorColor: widget.inputOptions.cursorStyle.color,
+                  cursorWidth: widget.inputOptions.cursorStyle.width,
+                  showCursor: !widget.inputOptions.cursorStyle.hide,
+                  style: widget.inputOptions.inputTextStyle,
+                  onSubmitted: (String value) {
+                    if (widget.inputOptions.newlineOnShiftEnter &&
+                        _shiftPressed) {
+                      setState(() {
+                        textController.text += '\n';
+                      });
+                    } else if (widget.inputOptions.sendOnEnter) {
+                      _sendMessage();
+                    }
+                  },
+                  onChanged: (String value) async {
+                    setState(() {});
+                    if (widget.inputOptions.onTextChange != null) {
+                      widget.inputOptions.onTextChange!(value);
+                    }
+                    WidgetsBinding.instance.addPostFrameCallback((_) async {
+                      if (widget.inputOptions.onMention != null) {
+                        await _checkMentions(value);
+                      }
+                    });
+                  },
+                  autocorrect: widget.inputOptions.autocorrect,
+                ),
               ),
             ),
             if (widget.inputOptions.trailing != null &&
@@ -237,10 +272,16 @@ class InputToolbarState extends State<InputToolbar>
     overlay.insert(_overlayEntry!);
   }
 
-  void _sendMessage() {
+  void _sendMessage({bool removeLastNewline = false}) {
     if (textController.text.isNotEmpty) {
+      var text = textController.text;
+      if (removeLastNewline) {
+        if (text.endsWith("\n")) {
+          text = text.substring(0, text.length - 1);
+        }
+      }
       final ChatMessage message = ChatMessage(
-        text: textController.text,
+        text: text,
         user: widget.currentUser,
         createdAt: DateTime.now(),
       );

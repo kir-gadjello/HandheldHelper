@@ -37,6 +37,7 @@ const MOBILE_DRAWER_TP = 84.0;
 const WorkspaceRoot = "HHH";
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
+const SEND_SHIFT_ENTER = true;
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
@@ -2345,6 +2346,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   void initState() {
     super.initState();
     if (isMobile()) WidgetsBinding.instance.addObserver(this);
+    // if (!isMobile()) {
+    //   ServicesBinding.instance.keyboard.addHandler(_onKey);
+    // }
   }
 
   @override
@@ -2362,8 +2366,25 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     _cancel_timers();
     // persistState();
     stop_llm_generation(now: true);
+    // if (!isMobile()) {
+    //   ServicesBinding.instance.keyboard.removeHandler(_onKey);
+    // }
     super.dispose();
   }
+
+  // bool _onKey(KeyEvent event) {
+  //   final key = event.logicalKey.keyLabel;
+  //
+  //   if (event is KeyDownEvent) {
+  //     print("Key down: $key");
+  //   } else if (event is KeyUpEvent) {
+  //     print("Key up: $key");
+  //   } else if (event is KeyRepeatEvent) {
+  //     print("Key repeat: $key");
+  //   }
+  //
+  //   return false;
+  // }
 
   _cancel_timers() {
     if (_msg_poll_timer?.isActive ?? false) {
@@ -3060,8 +3081,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     ),
                   ),
               // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
-              sendOnEnter: false,
-              sendOnShiftEnter: true,
+              sendOnEnter: !SEND_SHIFT_ENTER,
+              sendOnShiftEnter: SEND_SHIFT_ENTER,
+              newlineOnShiftEnter: !SEND_SHIFT_ENTER,
               alwaysShowSend: true,
               inputToolbarMargin: EdgeInsets.all(0.0),
               inputToolbarPadding: EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
@@ -3473,101 +3495,6 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _buildSearchResultItem(
-      BuildContext context, Chat chat, List<Message> messages) {
-    final navigate = getNavigate(context);
-
-    var highlight = Theme.of(context).colorScheme.primary;
-    var bgColor = Theme.of(context).listTileTheme.tileColor!;
-    var bg2Color = bgColor.lighter(30);
-    var textColor = Theme.of(context).listTileTheme.textColor;
-
-    if (_query == null) {
-      return const SizedBox(height: 8);
-    }
-
-    Widget msgs;
-
-    if (messages.length > 1) {
-      msgs = Column(
-          children: messages
-              .map((m) => Padding(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 2.0, horizontal: 4.0),
-                  child: Material(
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      child: ListTile(
-                        tileColor: m.username == "user"
-                            ? getUserMsgColor(context)
-                            : getAIMsgColor(context),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        minVerticalPadding: 2.0,
-                        textColor: textColor,
-                        contentPadding: const EdgeInsets.symmetric(
-                            vertical: 2.0, horizontal: 4.0),
-                        title: Container(
-                            child: highlightSearchResult(m.message, _query!,
-                                SEARCH_MAX_SNIPPET_LENGTH, highlight,
-                                max_n_lines: 4)),
-                        onTap: () {
-                          // Callback with relevant chatId and messageId
-                        },
-                      ))))
-              .toList());
-    } else {
-      // msgs = Text(messages[0].message);
-      msgs = ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        minVerticalPadding: 2.0,
-        tileColor: bg2Color,
-        textColor: textColor,
-        contentPadding:
-            const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
-        title: Container(
-            child: highlightSearchResult(messages[0].message, _query!,
-                SEARCH_MAX_SNIPPET_LENGTH, highlight,
-                max_n_lines: 4)),
-        onTap: () {
-          // Callback with relevant chatId and messageId
-        },
-      );
-    }
-
-    var lighterBgColor = bgColor.lighter(5);
-
-    var chatTileColor = lighterBgColor.darker(8);
-
-    return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
-        child: Container(
-          constraints: isMobile()
-              ? null
-              : BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.33,
-                ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: chatTileColor, width: 2),
-          ),
-          child: ListTile(
-            tileColor: chatTileColor,
-            textColor: textColor,
-            minVerticalPadding: 2.0,
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
-            subtitle: msgs,
-            title:
-                Text(chat.getHeading(), style: const TextStyle(fontSize: 22)),
-            onTap: () {
-              // Callback with relevant chatId and messageId
-              navigate(AppPage.chathistory, parameters: [chat.uuid.toString()]);
-            },
-          ),
-        ));
-  }
-
   @override
   Widget build(BuildContext context) {
     var bgColor = Theme.of(context).scaffoldBackgroundColor;
@@ -3740,9 +3667,13 @@ class _SingleChatHistoryPageState extends State<SingleChatHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+    var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
     return Scaffold(
       drawer: _buildDrawer(context),
       appBar: AppBar(
+        titleTextStyle:
+            isMobile() ? TextStyle(fontSize: 18, color: fgColor) : null,
         title: _chat == null
             ? Text('Loading chat history...')
             : Text("History of ${_chat!.getHeading()}"),
@@ -3773,7 +3704,7 @@ Widget buildListOfChatsWithMessages(
   var textColor = Theme.of(context).listTileTheme.textColor;
 
   var lighterBgColor = bgColor.lighter(5);
-  var chatTileColor = lighterBgColor.darker(8);
+  var chatTileColor = Colors.grey.darker(50);
 
   Widget msgs;
 
@@ -3864,7 +3795,8 @@ Widget buildListOfChatsWithMessages(
   }
 
   return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+    padding: EdgeInsets.symmetric(
+        vertical: isMobile() ? 3.0 : 2.0, horizontal: isMobile() ? 2.0 : 6.0),
     child: Container(
       constraints: isMobile()
           ? null
@@ -4314,6 +4246,8 @@ Color getAIMsgColor(BuildContext context) =>
 
 class HandheldHelper extends StatelessWidget {
   const HandheldHelper({super.key});
+  // const Color.fromRGBO(21, 33, 59, 1.0)
+  // const Color.fromRGBO(39, 49, 39, 1.0)
 
   ThemeData getAppTheme(BuildContext context, bool isDarkTheme) {
     var baseTheme = ThemeData(
@@ -4343,16 +4277,16 @@ class HandheldHelper extends StatelessWidget {
           // user msg color
           selectedTileColor: isDarkTheme
               ? /* Colors.deepPurple.shade800 */ const Color.fromRGBO(
-                  21, 33, 59, 1.0) /* HexColor(
+                  12, 42, 47, 1.0) /* HexColor(
                   "212f46") */
               : Colors.purple.shade50,
           tileColor: isDarkTheme
-              ? /* Colors.grey.shade900 */ const Color.fromRGBO(17, 24, 24, 1.0)
+              ? /* Colors.grey.shade900 */ const Color.fromRGBO(20, 15, 42, 1.0)
               : Colors.lightBlue.shade50),
       appBarTheme: AppBarTheme(
           backgroundColor:
               isDarkTheme ? Colors.grey.shade800 : Colors.lightBlue.shade600,
-          foregroundColor: isDarkTheme ? Colors.white70 : Colors.white,
+          foregroundColor: isDarkTheme ? Colors.white : Colors.white,
           iconTheme: IconThemeData(
               color: isDarkTheme ? Colors.white : Colors.black54)),
       // Additional custom color fields
