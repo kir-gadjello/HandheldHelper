@@ -25,6 +25,11 @@ const char* async_completion_poll(const char* cmd_json);
 
 const char* async_completion_cancel(const char* req_json);
 
+const char* save_state(const char* req_json);
+
+const char* load_state(const char* req_json);
+
+
 void deinit();
 
 #ifdef __cplusplus

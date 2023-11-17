@@ -71,17 +71,17 @@ class InputToolbarState extends State<InputToolbar>
     final key = event.logicalKey.keyLabel;
 
     if (event is KeyDownEvent) {
-      print("Key down: $key");
+      // print("Key down: $key");
       if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
         _shiftPressed = true;
       }
     } else if (event is KeyUpEvent) {
-      print("Key up: $key");
+      // print("Key up: $key");
       if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
         _shiftPressed = false;
       }
       if (_shiftPressed && event.logicalKey == LogicalKeyboardKey.enter) {
-        print("!!! SHIFT+ENTER");
+        // print("!!! SHIFT+ENTER");
         if (widget.inputOptions.sendOnShiftEnter) {
           _sendMessage(removeLastNewline: true);
           return false;
@@ -93,7 +93,7 @@ class InputToolbarState extends State<InputToolbar>
         }
       }
     } else if (event is KeyRepeatEvent) {
-      print("Key repeat: $key");
+      // print("Key repeat: $key");
       if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {
         _shiftPressed = true;
       }

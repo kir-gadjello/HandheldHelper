@@ -660,6 +660,34 @@ class ChatManager {
     return msg;
   }
 
+  // TODO better invariant
+  Future<List<Message>> popMessagesFromChat(Uuid chatId, int n_items) async {
+    final db = await _databaseHelper.database;
+    print("REWINDING $n_items MSGs IN CHAT=$chatId...");
+
+    var parent = await getChat(chatId);
+    List<Message> ret = [];
+
+    if (parent != null) {
+      var all_msgs = await getMessagesFromChat(chatId);
+      while (n_items-- > 0) {
+        if (all_msgs.isNotEmpty) {
+          var msg = all_msgs.removeLast();
+          var new_last_msg = all_msgs.lastOrNull;
+          ret.add(msg);
+          await deleteMessage(msg.uuid);
+          await updateChat(
+              chatId, {'last_msg_index': new_last_msg?.messageIndex ?? 0});
+        }
+      }
+    }
+
+    print("REWIND: ${ret.length} msgs removed");
+
+    return ret;
+  }
+
+  // TODO better invariant
   Future<Message?> addMessageToChat(
       Uuid chatId, String messageText, String username,
       {Map<String, dynamic>? meta}) async {
@@ -900,6 +928,7 @@ class ChatManager {
     return chatMessages;
   }
 
+  // TODO handle hypo messageIndex failure modes
   Future<List<Message>> getMessagesFromChat(Uuid chatId,
       {reversed = false, int? limit}) async {
     final db = await _databaseHelper.database;

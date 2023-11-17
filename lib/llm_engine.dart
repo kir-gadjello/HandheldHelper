@@ -258,6 +258,22 @@ class LLMEngine {
 
   Map<String, dynamic>? llama_init_json;
 
+  void reinitState() {
+    state = LLMEngineState.NOT_INITIALIZED;
+    msgs = [];
+    llama_init_json = null;
+    initialized = false;
+    init_in_progress = false;
+    postpone_init = false;
+    init_postponed = false;
+    loading_progress = 0.0;
+    streaming = false;
+    stream_msg_acc = "";
+    onInitDone = null;
+    tokens_used = 0;
+    n_ctx = 0;
+  }
+
   late binding.LLamaRPC rpc;
 
   LLMEngine(
@@ -304,7 +320,7 @@ class LLMEngine {
       return;
     }
 
-    reinit(
+    initialize(
         modelpath: modelpath,
         onInitDone: onInitDone,
         llama_init_json: llama_init_json);
@@ -354,14 +370,14 @@ class LLMEngine {
     return 0;
   }
 
-  bool reinit(
+  bool initialize(
       {required String modelpath,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
       VoidCallback? onInitDone,
       VoidCallback? Function(double)? onProgressUpdate}) {
     if (state == LLMEngineState.INITIALIZED_SUCCESS) {
-      teardown();
+      deinitialize();
     }
 
     this.modelpath = modelpath;
@@ -398,7 +414,7 @@ class LLMEngine {
 
         rpc.init_async(jsonEncode(init_json).toNativeUtf8().cast<ffi.Char>());
 
-        Timer.periodic(Duration(milliseconds: 250), (timer) {
+        Timer.periodic(const Duration(milliseconds: 250), (timer) {
           poll_init(onProgressUpdate: onProgressUpdate);
           if (initialized) {
             init_in_progress = false;
@@ -667,8 +683,9 @@ class LLMEngine {
     }
   }
 
-  void teardown() {
+  void deinitialize() {
     rpc.deinit();
     state = LLMEngineState.NOT_INITIALIZED;
+    reinitState();
   }
 }

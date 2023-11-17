@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:handheld_helper/db.dart';
 import 'package:path/path.dart' as Path;
 import 'package:flutter/material.dart';
@@ -42,16 +43,63 @@ const SEND_SHIFT_ENTER = true;
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
 final APPROVED_LLMS = [
-  LLMref(name: 'OpenHermes-2.5-Mistral-7B', size: 4368450304, sources: [
-    "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
-  ]),
-  LLMref(name: 'OpenHermes-2-Mistral-7B', size: 4368450272, sources: [
-    "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
-  ]),
-  LLMref(name: "TinyLLAMA-1t-OpenOrca", size: 667814368, sources: [
-    "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
-  ])
+  LLMref(
+      name: 'OpenHermes-2.5-Mistral-7B',
+      size: 4368450304,
+      ctxlen: "8k",
+      sources: [
+        "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
+      ]),
+  LLMref(
+      name: 'OpenHermes-2-Mistral-7B',
+      size: 4368450272,
+      ctxlen: "8k",
+      sources: [
+        "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
+      ]),
+  LLMref(
+      name: "TinyLLAMA-1t-OpenOrca",
+      size: 667814368,
+      ctxlen: "2k",
+      sources: [
+        "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
+      ]),
+  // Not ready yet
+  // LLMref(name: 'OpenChat-3.5-16K', size: 4368450304, sources: [
+  //   "https://huggingface.co/TheBloke/openchat_3.5-16k-GGUF/resolve/main/openchat_3.5-16k.Q4_K_M.gguf"
+  // ])
+  // Dolphin 2.2.1 Mistral 7B
+  // https://huggingface.co/TheBloke/dolphin-2.2.1-mistral-7B-GGUF/blob/main/dolphin-2.2.1-mistral-7b.Q4_K_M.gguf
 ];
+
+class HexColor extends Color {
+  static bool isHexColor(String s) {
+    // Remove the hash if it exists
+    s = s.replaceAll("#", "");
+
+    // Check if the length is 6 or 8
+    if (s.length == 6 || s.length == 8) {
+      // Check if all characters are hexadecimal
+      return RegExp(r'^[0-9A-Fa-f]+$').hasMatch(s);
+    }
+
+    // If the length is not 6 or 8, or if the string contains non-hexadecimal characters, return false
+    return false;
+  }
+
+  static int _getColorFromHex(String hexColor) {
+    if (!isHexColor(hexColor)) {
+      return 0xFFAAAAAA;
+    }
+    hexColor = hexColor.toUpperCase().replaceAll("#", "");
+    if (hexColor.length == 6) {
+      hexColor = "FF" + hexColor;
+    }
+    return int.parse(hexColor, radix: 16);
+  }
+
+  HexColor(final String hexColor) : super(_getColorFromHex(hexColor));
+}
 
 void Function(AppPage page,
     {VoidCallback? onBeforeNavigate,
@@ -569,12 +617,15 @@ class RootAppParams {
       };
 }
 
+// typedef StringOrNumber String | Number;
+
 class LLMref {
   List<String> sources;
   String? fileName;
   String? promptFormat = "chatml";
   String name;
   int size;
+  int? native_ctxlen;
   Map<String, dynamic>? meta;
 
   String getFileName() {
@@ -590,8 +641,10 @@ class LLMref {
       required this.name,
       required this.size,
       this.promptFormat,
+      dynamic ctxlen,
       this.meta,
       this.fileName}) {
+    native_ctxlen = parse_numeric_shorthand(ctxlen);
     if (fileName == null) {
       assert(sources.isNotEmpty);
       fileName = getFileName();
@@ -604,6 +657,16 @@ String resolve_default_llm() {
   if (defmod.isNotEmpty) {
     print("Overriding default model: $defmod");
   }
+
+  var ram_size = SysInfo.getTotalPhysicalMemory();
+
+  if (Platform.isAndroid && ram_size < (5.5 * 1024 * 1024 * 1024)) {
+    print(
+        "LOW RAM DEVICE: $ram_size bytes RAM AVAILABLE, OVERRIDING DEFAULT MODEL");
+    var llm = APPROVED_LLMS.firstWhere((llm) => llm.name.contains("TinyLLAMA"));
+    return llm.name;
+  }
+
   var llm = APPROVED_LLMS.firstWhere((llm) => llm.name == defmod,
       orElse: () => APPROVED_LLMS[0]);
   return llm.name;
@@ -1073,21 +1136,32 @@ class _CollapsibleWidgetState extends State<CollapsibleWidget> {
 
 const colorBlueSelected = Color.fromRGBO(191, 238, 234, 1.0);
 
-Widget plainOutline(Widget w) => Container(
+Widget plainOutline(
+        {required Widget child, Color bgcolor = colorBlueSelected}) =>
+    Container(
       padding: const EdgeInsets.all(0.0),
       margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
       decoration: BoxDecoration(
-        color: colorBlueSelected,
+        color: bgcolor,
         borderRadius: BorderRadius.circular(24.0),
       ),
-      child: w,
+      child: child,
     );
 
 class HoverableText extends StatefulWidget {
   final Widget child;
+  Color hoverBgColor;
+  Color bgColor;
+  BorderRadiusGeometry borderRadius;
   Function()? onTap;
 
-  HoverableText({required this.child, Function()? onTap});
+  HoverableText(
+      {required this.child,
+      BorderRadiusGeometry? borderRadius,
+      Color this.hoverBgColor = Colors.lightBlueAccent,
+      Color this.bgColor = Colors.lightBlue,
+      Function()? onTap})
+      : borderRadius = borderRadius ?? BorderRadius.circular(24.0);
 
   @override
   _HoverableTextState createState() => _HoverableTextState();
@@ -1116,10 +1190,8 @@ class _HoverableTextState extends State<HoverableText> {
           padding: const EdgeInsets.all(0.0),
           margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
           decoration: BoxDecoration(
-            color: _isHovering
-                ? colorBlueSelected
-                : Colors.lightBlueAccent.shade100,
-            borderRadius: BorderRadius.circular(24.0),
+            color: _isHovering ? widget.bgColor : widget.hoverBgColor,
+            borderRadius: widget.borderRadius,
           ),
           child: widget.child,
         ),
@@ -1230,6 +1302,7 @@ class CustomFilePicker extends StatefulWidget {
   final String name;
   final bool isDirectoryPicker;
   String? initialValue;
+  String? pickBtnText;
   final Future<bool> Function(String path)? execAdditionalFileCheck;
   Color errBgBtnColor;
   Color? errBgColor;
@@ -1240,6 +1313,7 @@ class CustomFilePicker extends StatefulWidget {
       {required this.label,
       required this.name,
       required this.isDirectoryPicker,
+      this.pickBtnText,
       this.initialValue,
       this.execAdditionalFileCheck,
       this.errBgColor,
@@ -1424,17 +1498,20 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
 
     String? path;
     try {
-      // if (widget.isDirectoryPicker) {
-      //   path = await FilePicker.platform.getDirectoryPath();
-      // } else {
-      //   FilePickerResult? result = await FilePicker.platform.pickFiles();
-      //   path = result?.files.single.path;
-      // }
-      print("PICK PATH: $isDirectoryPicker $initialPath");
-      path = await _pickPath(context,
-          rootPath: initialPath,
-          isDirectory: isDirectoryPicker,
-          allowedExtensions: allowedExtensions);
+      if (isMobile()) {
+        print("PICK PATH: $isDirectoryPicker $initialPath");
+        path = await _pickPath(context,
+            rootPath: initialPath,
+            isDirectory: isDirectoryPicker,
+            allowedExtensions: allowedExtensions);
+      } else {
+        if (widget.isDirectoryPicker) {
+          path = await FilePicker.platform.getDirectoryPath();
+        } else {
+          FilePickerResult? result = await FilePicker.platform.pickFiles();
+          path = result?.files.single.path;
+        }
+      }
     } catch (e) {
       print(e);
     } finally {
@@ -1556,7 +1633,11 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
                       child: CircularProgressIndicator(),
                     )
                   : Text(
-                      widget.isDirectoryPicker ? 'Open directory' : 'Open file',
+                      widget.pickBtnText == null
+                          ? (widget.isDirectoryPicker
+                              ? 'Open directory'
+                              : 'Open file')
+                          : widget.pickBtnText!,
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.bold),
                     ),
@@ -1687,7 +1768,7 @@ const HHH_MODEL_SUBDIR = "Models";
 class _AppSetupForm extends State<AppSetupForm> {
   double btnFontSize = 20;
   bool canUserAdvance = false;
-  bool remind_storage_permissions = !Platform.isLinux;
+  bool remind_storage_permissions = true; // !Platform.isLinux;
   bool permissions_asked = false;
   bool _downloadCanStart = false;
   bool _downloadNecessary = true;
@@ -1872,11 +1953,8 @@ class _AppSetupForm extends State<AppSetupForm> {
 
   @override
   Widget build(BuildContext context) {
-    final platform_requires_storage_permissions =
-        Platform.isMacOS || Platform.isAndroid;
-
-    var largeBtnFontStyle =
-        TextStyle(fontSize: btnFontSize, color: Colors.blue);
+    final platform_requires_storage_permissions = false;
+    // Platform.isMacOS || Platform.isAndroid;
 
     double setupTextSize = isMobile() ? 13 : 15;
 
@@ -1890,9 +1968,28 @@ class _AppSetupForm extends State<AppSetupForm> {
 
     String user_home_dir = guess_user_home_dir() ?? hhh_dir;
 
+    // var mainPadding = isMobile()
+    //     ? const EdgeInsets.fromLTRB(6.0, 4.0, 6.0, 4.0)
+    //     : const EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
+
+    const desktopOuterPadding = 0.5;
+    const mainBorderRadius = 0.1;
+    const mainSetupBgColor = Colors.black; // Colors.blue[100];
+    const mainSetupTextColor = Colors.white;
+
+    var setupSubBorderRadius = BorderRadius.circular(24.0);
+    var setupSubBgColor = Colors.lightGreen.shade400;
+    var setupSubHoverBgColor = Colors.lightGreen.shade200;
+    var setupSubExpandedBgColor = setupSubHoverBgColor;
+    var autoInstallerInfoStyle = TextStyle(color: Colors.grey.shade500);
+    var desktopSetupWidthConstrn = 820.0;
+
+    var largeBtnFontStyle =
+        TextStyle(fontSize: btnFontSize, color: Colors.blue.darker(30));
+
     var mainPadding = isMobile()
         ? const EdgeInsets.fromLTRB(6.0, 4.0, 6.0, 4.0)
-        : const EdgeInsets.fromLTRB(48.0, 24.0, 48.0, 24.0);
+        : const EdgeInsets.fromLTRB(4.5, 0.5, 4.5, 0.5);
 
     var interButtonPadding = isMobile()
         ? const EdgeInsets.symmetric(vertical: 21.0, horizontal: 12.0)
@@ -1917,12 +2014,18 @@ class _AppSetupForm extends State<AppSetupForm> {
         // height: MediaQuery.of(context).size.height,
         margin: isMobile()
             ? const EdgeInsets.fromLTRB(2.0, 4.0, 2.0, 4.0)
-            : const EdgeInsets.all(48.0),
-        decoration: BoxDecoration(
-          color: Colors.blue[100],
-          borderRadius: const BorderRadius.all(Radius.circular(30)),
+            : const EdgeInsets.all(desktopOuterPadding),
+        // : const EdgeInsets.all(48.0),
+        decoration: const BoxDecoration(
+          color: mainSetupBgColor,
+          borderRadius: BorderRadius.all(Radius.circular(mainBorderRadius)),
         ),
-        child: Padding(
+        child: Container(
+            constraints: isMobile()
+                ? null
+                : BoxConstraints(
+                    maxWidth: min(MediaQuery.of(context).size.width,
+                        desktopSetupWidthConstrn)),
             padding: mainPadding,
             child: SingleChildScrollView(
                 child: FastForm(
@@ -1933,7 +2036,7 @@ class _AppSetupForm extends State<AppSetupForm> {
                     children: <Widget>[
                   const Text(
                     'Welcome 👋💠',
-                    style: TextStyle(fontSize: 48),
+                    style: TextStyle(fontSize: 48, color: mainSetupTextColor),
                   ),
                   Padding(
                       padding: const EdgeInsets.symmetric(
@@ -1943,22 +2046,27 @@ class _AppSetupForm extends State<AppSetupForm> {
 HHH respects your privacy: once the LLM is downloaded, it works purely offline and never shares your data.
 LLM checkpoints are large binary files. To download, store, manage and operate them, the app needs certain permissions, as well as network bandwidth and storage space – currently 4.1 GB for a standard 7B model.''',
                         textAlign: TextAlign.left,
-                        style: TextStyle(fontSize: setupTextSize),
+                        style: TextStyle(
+                            fontSize: setupTextSize, color: mainSetupTextColor),
                       )),
                   if (remind_storage_permissions &&
                       platform_requires_storage_permissions)
                     HoverableText(
+                        borderRadius: setupSubBorderRadius,
+                        bgColor: setupSubBgColor,
+                        hoverBgColor: setupSubHoverBgColor,
                         child: Padding(
-                      padding: interButtonPadding,
-                      child: Row(children: [
-                        Expanded(
-                            child: Text(
-                          'Please accept data storage permissions.',
-                          style: largeBtnFontStyle,
+                          padding: interButtonPadding,
+                          child: Row(children: [
+                            Expanded(
+                                child: Text(
+                              'Please accept data storage permissions',
+                              style: largeBtnFontStyle,
+                            )),
+                            const Icon(Icons.check,
+                                size: 32, color: Colors.grey),
+                          ]),
                         )),
-                        const Icon(Icons.check, size: 32, color: Colors.grey),
-                      ]),
-                    )),
                   CollapsibleWidget(
                       crossCircle: true,
                       onExpand: () {
@@ -1970,20 +2078,38 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                         _resetOneClickState();
                       },
                       collapsedChild: HoverableText(
+                          borderRadius: setupSubBorderRadius,
+                          bgColor: setupSubBgColor,
+                          hoverBgColor: setupSubHoverBgColor,
                           child: Padding(
-                        padding: interButtonPadding,
-                        child: Row(children: [
-                          Expanded(
-                              child: Text(
-                            'Accept the data storage defaults and download the recommended LLM (${defaultLLM.name})',
-                            style: largeBtnFontStyle,
+                            padding: interButtonPadding,
+                            child: Row(children: [
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                    Text(
+                                      'Accept recommended settings and begin downloading the AI model',
+                                      style: largeBtnFontStyle,
+                                      // 'Accept the data storage defaults and download the recommended LLM (${defaultLLM.name})',
+                                    ),
+                                    Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                              'Download size: ${(defaultLLM.size / 1e9).toStringAsFixed(1)}Gb',
+                                              style: autoInstallerInfoStyle)
+                                        ])
+                                  ])),
+                              const Icon(Icons.download_for_offline,
+                                  size: 32, color: Colors.grey),
+                            ]),
                           )),
-                          const Icon(Icons.download_for_offline,
-                              size: 32, color: Colors.grey),
-                        ]),
-                      )),
                       expandedChild: plainOutline(
-                        Padding(
+                        bgcolor: setupSubExpandedBgColor,
+                        child: Padding(
                             padding: const EdgeInsets.symmetric(
                                 vertical: 44.0, horizontal: 24.0),
                             child: Column(children: [
@@ -2035,21 +2161,25 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                   CollapsibleWidget(
                       crossCircle: true,
                       collapsedChild: HoverableText(
+                          borderRadius: setupSubBorderRadius,
+                          bgColor: setupSubBgColor,
+                          hoverBgColor: setupSubHoverBgColor,
                           child: Padding(
-                        padding: interButtonPadding,
-                        child: Row(children: [
-                          Expanded(
-                              child: Text(
-                                  'Show advanced model & storage settings',
-                                  style: TextStyle(
-                                      fontSize: btnFontSize,
-                                      color: Colors.blue))),
-                          const Icon(Icons.app_settings_alt,
-                              size: 32, color: Colors.grey),
-                        ]),
-                      )),
+                            padding: interButtonPadding,
+                            child: Row(children: [
+                              Expanded(
+                                  child: Text(
+                                      'Show advanced model & storage settings',
+                                      style: TextStyle(
+                                          fontSize: btnFontSize,
+                                          color: largeBtnFontStyle.color))),
+                              const Icon(Icons.app_settings_alt,
+                                  size: 32, color: Colors.grey),
+                            ]),
+                          )),
                       expandedChild: plainOutline(
-                        Padding(
+                        bgcolor: setupSubExpandedBgColor,
+                        child: Padding(
                             padding: interButtonPadding,
                             child: Column(children: [
                               Row(children: [
@@ -2065,19 +2195,22 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                               separator,
                               CustomFilePicker(
                                   initialValue: hhh_dir,
+                                  pickBtnText: "Pick folder",
                                   label: "HandHeld Helper root directory",
                                   name: "hhh_root",
                                   isDirectoryPicker: true),
                               separator,
                               CustomFilePicker(
-                                  initialValue: isMobile()
-                                      ? "__%DOWNLOADS"
-                                      : user_home_dir,
+                                  pickBtnText: "Pick file",
+                                  // initialValue: isMobile()
+                                  //     ? "__%DOWNLOADS"
+                                  //     : user_home_dir,
                                   label: "Custom default LLM file (GGUF)",
                                   name: "custom_default_model",
                                   isDirectoryPicker: false),
                               separator,
                               CustomFilePicker(
+                                  pickBtnText: "Pick folder",
                                   label:
                                       "(Optional) Auxiliary custom model directory",
                                   name: "aux_model_root",
@@ -2339,11 +2472,38 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   DateTime? _prompt_processing_completed;
   DateTime? _prompt_processing_initiated;
   double llm_load_progress = 0.0;
+  bool suspended = false;
+
+  TextEditingController dashChatInputController = TextEditingController();
+  FocusNode dashChatInputFocusNode = FocusNode();
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
+  reinitState() {
+    _msg_streaming = false;
+    _msg_poll_timer;
+    settings = Settings();
+    _initialized = false;
+    _token_counter_sync;
+    _input_tokens = 0;
+    _current_chat;
+    _last_chat_persist;
+    _current_msg_input = "";
+    _incomplete_msg;
+    _prompt_processing_progress = 0;
+    _prompt_processing_ntokens = 0.0;
+    _prompt_processing_completed;
+    _prompt_processing_initiated;
+    llm_load_progress = 0.0;
+    suspended = false;
+    llama_init_json = resolve_init_json();
+    dashChatInputController.dispose();
+    dashChatInputController = TextEditingController();
+  }
+
   @override
   void initState() {
+    print("LIFECYCLE: ACTIVE CHAT .INITSTATE()");
     super.initState();
     if (isMobile()) WidgetsBinding.instance.addObserver(this);
     // if (!isMobile()) {
@@ -2354,14 +2514,39 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (isMobile() && state == AppLifecycleState.paused) {
-      print("ANDROID: The app is about to be suspended, persisting...");
+      print(
+          "ANDROID OS: PAUSED. The app is about to be suspended, persisting...");
       _cancel_timers();
       persistState();
+      // llm.deinitialize(); - OS can NOT do this, we could hope for it
+      suspended = true;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      print(
+          "ANDROID OS: RESUMED. The app has been resumed, suspended=$suspended");
+      if (suspended && llm.initialized) {
+        print("Attempting to restore AI answer streaming...");
+        if (_msg_streaming) {
+          _enable_stream_poll_timer();
+        }
+      } else {
+        print(
+            "suspended=$suspended, llm.initialized=${llm.initialized} => attempting to restart AI & chat...");
+        reinitState();
+        setState(() {});
+      }
     }
   }
 
   @override
   void dispose() {
+    print("LIFECYCLE: ACTIVE CHAT .DISPOSE()");
+    dashChatInputController.dispose();
+    dashChatInputFocusNode.dispose();
+    if (isMobile()) {
+      WidgetsBinding.instance!.removeObserver(this);
+    }
     print("ActiveChatDialogState: attempting to persist state...");
     _cancel_timers();
     // persistState();
@@ -2553,23 +2738,26 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   Future<void> clearPersistedState({onlyStreaming = false}) async {
-    if (onlyStreaming) {
-      print("clearPersistedState onlyStreaming = true");
+    try {
+      if (onlyStreaming) {
+        print("clearPersistedState onlyStreaming = true");
 
-      var data = await metaKV.getMetadata("_persist_active_chat_state");
-      if (data == null) {
-        return;
+        var data = await metaKV.getMetadata("_persist_active_chat_state");
+        if (data == null) {
+          return;
+        } else {
+          var jmap = data as Map<String, dynamic>;
+          jmap["_msg_streaming"] = false;
+          jmap.remove("_ai_msg_stream_acc");
+          await metaKV.setMetadata("_persist_active_chat_state", jmap);
+          print("clearPersistedState SUCCESS");
+        }
+      } else {
+        await metaKV.deleteMetadata("_persist_active_chat_state");
       }
-
-      if (data is Map<String, dynamic>) {
-        var jmap = data as Map<String, dynamic>;
-        jmap["_msg_streaming"] = false;
-        jmap.remove("_ai_msg_stream_acc");
-        await metaKV.setMetadata("_persist_active_chat_state", jmap);
-        print("clearPersistedState SUCCESS");
-      }
-    } else {
-      await metaKV.deleteMetadata("_persist_active_chat_state");
+    } catch (e) {
+      print(
+          "Error during clearPersistedState, onlyStreaming=$onlyStreaming, Exception:$e");
     }
   }
 
@@ -2633,7 +2821,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       // Clean possible erroneous states, e.g. last msg is user's
       if (_messages[0].user == user) {
         print("LAST MESSAGE IS FROM USER, REWINDING...");
-        // TODO
+        var rewound = await rewindChat(1);
+        if (rewound.isNotEmpty && rewound[0].username == "user") {
+          set_chat_input_field(rewound[0].message);
+          print("REWIND SUCCESSFUL");
+        } else {
+          print("REWIND FAIlED, rewound=$rewound");
+        }
       }
 
       return true;
@@ -2661,6 +2855,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     var tokens_used = sync_messages_to_llm();
 
     setState(() {
+      _initialized = true;
       _msg_streaming = false;
       _prompt_processing_ntokens = 0.0;
       _prompt_processing_initiated = null;
@@ -2679,6 +2874,25 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
+  Future<List<Message>> rewindChat(int n_items_to_rewind) async {
+    Chat current = await getCurrentChat();
+    var removed_msgs =
+        await chatManager.popMessagesFromChat(current.uuid, n_items_to_rewind);
+    var restored_messages = dbMsgsToDashChatMsgs(await chatManager
+        .getMessagesFromChat(_current_chat!.uuid, reversed: true));
+    _messages = restored_messages;
+    sync_messages_to_llm();
+    return removed_msgs;
+  }
+
+  void set_chat_input_field(String s) {
+    _current_msg_input = s;
+    _update_token_counter(s);
+    dashChatInputController.text = s;
+    dashChatInputController.notifyListeners();
+    setState(() {});
+  }
+
   Future<void> addMessageToActiveChat(String username, String msg,
       {Map<String, dynamic>? meta}) async {
     Chat current = await getCurrentChat();
@@ -2687,7 +2901,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     var cmsg = ChatMessage(
         user: getChatUserByName(username),
         createdAt: DateTime.now(),
-        text: msg);
+        text: msg,
+        customProperties: meta);
 
     _messages.insert(0, cmsg);
     markChatMessageSpecial(cmsg, meta);
@@ -2834,7 +3049,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       ];
     });
 
-    llm.reinit(
+    llm.initialize(
         modelpath: new_modelpath,
         llama_init_json: resolve_init_json(),
         onProgressUpdate: (double progress) {
@@ -2882,7 +3097,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       } else {
         print("[OK] RESTORE CHAT SUCCEEDED");
         print("Messages: ${msgs_toJson()}");
-        setState(() {});
+        setState(() {
+          _initialized = true;
+        });
       }
     });
   }
@@ -2897,7 +3114,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) requestStoragePermission();
-      llm.reinit(
+      llm.initialize(
           modelpath: resolve_llm_file(p),
           llama_init_json: resolve_init_json(),
           onProgressUpdate: (double progress) {
@@ -3034,11 +3251,15 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     // print("aiIsThinking: $aiIsThinking, showMsgProgress: $showMsgProgress");
 
-    if (app_setup_done()) {
+    var _app_setup_done = app_setup_done();
+
+    if (_app_setup_done) {
       initAIifNotAlready();
       mainWidget = Expanded(
         child: DashChat(
           inputOptions: InputOptions(
+              textController: dashChatInputController,
+              focusNode: dashChatInputFocusNode,
               sendButtonBuilder: (Function fct) => InkWell(
                     onTap: () => fct(),
                     child: Padding(
@@ -3085,8 +3306,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               sendOnShiftEnter: SEND_SHIFT_ENTER,
               newlineOnShiftEnter: !SEND_SHIFT_ENTER,
               alwaysShowSend: true,
-              inputToolbarMargin: EdgeInsets.all(0.0),
-              inputToolbarPadding: EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
+              inputToolbarMargin: const EdgeInsets.all(0.0),
+              inputToolbarPadding:
+                  const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
               inputMaxLines: 15,
               inputDecoration: InputDecoration(
                 isDense: true,
@@ -3155,6 +3377,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             dlog("NEW MSG: ${m.text}");
             _input_tokens = 0;
             addMsg(m);
+            dashChatInputController.text = "";
+            dashChatInputController.notifyListeners();
+            if (isMobile()) {
+              dashChatInputFocusNode.unfocus();
+              FocusManager.instance.primaryFocus?.unfocus();
+            }
+            setState(() {});
           },
           messages: _messages,
         ),
@@ -3199,104 +3428,106 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       key: _scaffoldKey,
       drawer: _buildDrawer(context),
       resizeToAvoidBottomInset: isMobile(),
-      appBar: AppBar(
-          leading: IconButton(
-            color: iconEnabledColor,
-            padding: actionIconPadding,
-            icon: Icon(Icons.menu,
+      appBar: _app_setup_done
+          ? AppBar(
+              leading: IconButton(
                 color: iconEnabledColor,
-                size: actionIconSize), // change this size and style
-            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          title: Row(children: [
-            if (!isMobile())
-              Expanded(
-                  child: Text(APP_TITLE_SHORT,
-                      style: TextStyle(
-                          color: headerTextColor,
-                          fontStyle: FontStyle.italic,
-                          fontSize: actionIconSize))),
-            Text(
-              "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
-              style: TextStyle(
-                  color: actionsEnabled
-                      ? (tokenOverload ? warningColor : headerTextColor)
-                      : disabledColor),
-            )
-          ]),
-          actions: <Widget>[
-            if (_msg_streaming)
-              IconButton(
                 padding: actionIconPadding,
-                icon: Icon(
-                  size: actionIconSize,
-                  Icons.stop,
-                  color: iconEnabledColor,
+                icon: Icon(Icons.menu,
+                    color: iconEnabledColor,
+                    size: actionIconSize), // change this size and style
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              ),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              title: Row(children: [
+                if (!isMobile())
+                  Expanded(
+                      child: Text(APP_TITLE_SHORT,
+                          style: TextStyle(
+                              color: headerTextColor,
+                              fontStyle: FontStyle.italic,
+                              fontSize: actionIconSize))),
+                Text(
+                  "T:${llm.tokens_used + _input_tokens}/${llm.n_ctx}",
+                  style: TextStyle(
+                      color: actionsEnabled
+                          ? (tokenOverload ? warningColor : headerTextColor)
+                          : disabledColor),
+                )
+              ]),
+              actions: <Widget>[
+                if (_msg_streaming)
+                  IconButton(
+                    padding: actionIconPadding,
+                    icon: Icon(
+                      size: actionIconSize,
+                      Icons.stop,
+                      color: iconEnabledColor,
+                    ),
+                    onPressed: stop_llm_generation,
+                  ),
+                IconButton(
+                  padding: actionIconPadding,
+                  disabledColor: disabledColor,
+                  icon: Icon(
+                    size: actionIconSize,
+                    Icons.psychology_sharp,
+                    color: iconColor,
+                  ),
+                  onPressed: actionsEnabled ? show_settings_menu : null,
                 ),
-                onPressed: stop_llm_generation,
-              ),
-            IconButton(
-              padding: actionIconPadding,
-              disabledColor: disabledColor,
-              icon: Icon(
-                size: actionIconSize,
-                Icons.psychology_sharp,
-                color: iconColor,
-              ),
-              onPressed: actionsEnabled ? show_settings_menu : null,
-            ),
-            IconButton(
-              padding: actionIconPadding,
-              disabledColor: disabledColor,
-              icon: Icon(
-                size: actionIconSize,
-                Icons.add_box_outlined,
-                color: iconColor,
-              ),
-              onPressed: actionsEnabled ? reset_current_chat : null,
-            ),
-            PopupMenuButton<String>(
-              padding: actionIconPadding,
-              iconSize: actionIconSize,
-              color: iconEnabledColor,
-              onSelected: (item) {
-                switch (item) {
-                  case "model_switch":
-                    if (actionsEnabled) showModelSwitchMenu();
-                    break;
-                  case "share":
-                    executeChatShare();
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem<String>(
-                    value: "model_switch",
-                    child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.sync_alt,
-                            color: Colors.black,
-                          ),
-                          Text("  Switch model")
-                        ])),
-                const PopupMenuItem<String>(
-                    value: "share",
-                    child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.ios_share,
-                            color: Colors.black,
-                          ),
-                          Text("  Share chat")
-                        ])),
+                IconButton(
+                  padding: actionIconPadding,
+                  disabledColor: disabledColor,
+                  icon: Icon(
+                    size: actionIconSize,
+                    Icons.add_box_outlined,
+                    color: iconColor,
+                  ),
+                  onPressed: actionsEnabled ? reset_current_chat : null,
+                ),
+                PopupMenuButton<String>(
+                  padding: actionIconPadding,
+                  iconSize: actionIconSize,
+                  color: iconEnabledColor,
+                  onSelected: (item) {
+                    switch (item) {
+                      case "model_switch":
+                        if (actionsEnabled) showModelSwitchMenu();
+                        break;
+                      case "share":
+                        executeChatShare();
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<String>(
+                        value: "model_switch",
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.sync_alt,
+                                color: Colors.black,
+                              ),
+                              Text("  Switch model")
+                            ])),
+                    const PopupMenuItem<String>(
+                        value: "share",
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.ios_share,
+                                color: Colors.black,
+                              ),
+                              Text("  Share chat")
+                            ])),
+                  ],
+                ),
               ],
-            ),
-          ],
-          toolbarHeight: 48.0),
+              toolbarHeight: 48.0)
+          : null,
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
@@ -3888,28 +4119,120 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   }
 }
 
+class SettingsPage extends StatefulWidget {
+  @override
+  _SettingsPageState createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final MetadataManager _metadataManager = MetadataManager();
+  final TextEditingController _userMessageColorController =
+      TextEditingController();
+  final TextEditingController _aiMessageColorController =
+      TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+    var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
+    var bgColor2 = Colors.black;
+
+    return Scaffold(
+        drawer: _buildDrawer(context),
+        appBar: AppBar(backgroundColor: bgColor, title: Text("Settings")),
+        body: Container(
+            width: screenWidth,
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height,
+            ),
+            child: SafeArea(
+                child: SingleChildScrollView(
+                    child: FastForm(
+                        formKey: _formKey,
+                        onChanged: (m) {
+                          print("Settings form updated: $m");
+                        },
+                        children: [
+                  FastFormSection(
+                      header: const Text('My Form'),
+                      padding: EdgeInsets.all(16.0),
+                      children: [
+                        // Column(children: [
+                        FastSwitch(
+                          name: 'dark_theme',
+                          labelText: 'Dark theme',
+                          onChanged: (value) {
+                            _metadataManager.setMetadata('dark_theme', value);
+                          },
+                        ),
+                        // FastDropdown<String>(
+                        //   name: 'default_model',
+                        //   labelText: 'Default Model',
+                        //   items: ['Model 1', 'Model 2', 'Model 3'],
+                        //   initialValue: 'Model 1',
+                        //   onChanged: (value) {
+                        //     _metadataManager.setMetadata(
+                        //         'default_model', value);
+                        //   },
+                        // ),
+                        // FastDropdown<String>(
+                        //   name: 'default_system_prompt',
+                        //   labelText: 'Default System Prompt',
+                        //   items: ['Basic', 'Prompt 2', 'Prompt 3'],
+                        //   initialValue: 'Basic',
+                        //   onChanged: (value) {
+                        //     _metadataManager.setMetadata(
+                        //         'default_system_prompt', value);
+                        //   },
+                        // ),
+                        // FastTextField(
+                        //   name: 'user_message_color',
+                        //   labelText: 'User Message Color',
+                        //   onChanged: (value) {
+                        //     if (value != null && HexColor.isHexColor(value)) {
+                        //       _metadataManager.setMetadata(
+                        //           'user_message_color', value);
+                        //     }
+                        //   },
+                        // ),
+                        // FastTextField(
+                        //   name: 'ai_message_color',
+                        //   labelText: 'AI Message Color',
+                        //   onChanged: (value) {
+                        //     _metadataManager.setMetadata(
+                        //         'ai_message_color', value);
+                        //   },
+                        // ),
+                        // ])
+                      ])
+                ])))));
+  }
+}
+
 class LifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     switch (state) {
       case AppLifecycleState.resumed:
-        print('App is resumed');
+        print('LIFECYCLE: App is resumed');
         break;
       case AppLifecycleState.paused:
-        print('App is paused');
+        print('LIFECYCLE: App is paused');
         break;
       case AppLifecycleState.inactive:
-        print('App is inactive');
+        print('LIFECYCLE: App is inactive');
         break;
       case AppLifecycleState.detached:
-        print('App is detached');
+        print('LIFECYCLE: App is detached');
         break;
       case AppLifecycleState.hidden:
-        print('App is hidden');
+        print('LIFECYCLE: App is hidden');
         break;
       default:
-        print('AppLifecycleState: $state');
+        print('LIFECYCLE: AppLifecycleState: $state');
         break;
     }
   }
@@ -4167,7 +4490,7 @@ class _PseudoRouter extends State<PseudoRouter> {
         currentPage = ActiveChatPage(
             title: APP_TITLE, appInitParams: widget.appInitParams);
       case AppPage.settings:
-        currentPage = UnderConstructionWidget();
+        currentPage = UnderConstructionWidget(); // SettingsPage();
       case AppPage.search:
         currentPage = SearchPage();
       case AppPage.history:
@@ -4222,18 +4545,6 @@ class _AppStartupState extends State<AppStartup> {
           return PseudoRouter(snapshot.data!);
         });
   }
-}
-
-class HexColor extends Color {
-  static int _getColorFromHex(String hexColor) {
-    hexColor = hexColor.toUpperCase().replaceAll("#", "");
-    if (hexColor.length == 6) {
-      hexColor = "FF" + hexColor;
-    }
-    return int.parse(hexColor, radix: 16);
-  }
-
-  HexColor(final String hexColor) : super(_getColorFromHex(hexColor));
 }
 
 Color getUserMsgColor(BuildContext context) =>
@@ -4322,11 +4633,13 @@ class HandheldHelper extends StatelessWidget {
   Widget build(BuildContext context) {
     var colorScheme = ColorScheme.fromSeed(
         seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
+    var isDarkMode =
+        MediaQuery.of(context).platformBrightness == Brightness.dark;
     return MaterialApp(
       title: 'HandHeld Helper',
       debugShowCheckedModeBanner: false,
 
-      theme: getAppTheme(context, DEFAULT_THEME_DARK),
+      theme: getAppTheme(context, isDarkMode), //  DEFAULT_THEME_DARK),
 
       //theme: ThemeData(
       //   colorScheme: colorScheme,

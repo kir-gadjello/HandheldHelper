@@ -2,6 +2,9 @@
 // import 'dart:convert';
 // import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:intl/intl.dart';
 
 bool isMobile() => Platform.isAndroid;
@@ -111,4 +114,51 @@ bool directoryExistsAndWritableSync(String path) {
   }
 
   return true;
+}
+
+final Map<String, int> sizeSuffixesDecimal = {
+  'k': 1000,
+  'm': 1000000,
+  'g': 1000000000,
+  't': 1000000000000,
+};
+
+final Map<String, int> sizeSuffixesBinary = {
+  'k': 1024,
+  'm': 1024 * 1024,
+  'g': 1024 * 1024 * 1024,
+  't': 1024 * 1024 * 1024 * 1024,
+};
+
+int? parseStringWithSuffix(String input, {bool decimal = false}) {
+  input = input.toLowerCase();
+  String lastChar = input.substring(input.length - 1);
+
+  var sizeSuffixes = decimal ? sizeSuffixesDecimal : sizeSuffixesBinary;
+
+  if (sizeSuffixes.containsKey(lastChar)) {
+    String numberString = input.substring(0, input.length - 1);
+    int? number = int.tryParse(numberString);
+    if (number != null) {
+      return number * sizeSuffixes[lastChar]!;
+    }
+  } else {
+    return int.tryParse(input);
+  }
+
+  return null;
+}
+
+int? parse_numeric_shorthand(dynamic x, {int? fallback, bool decimal = false}) {
+  if (x is String) {
+    var ret = parseStringWithSuffix(x, decimal: decimal);
+    if (ret != null) {
+      return ret;
+    }
+  } else if (x is int) {
+    return x;
+  }
+  if (fallback != null) {
+    return fallback;
+  }
 }

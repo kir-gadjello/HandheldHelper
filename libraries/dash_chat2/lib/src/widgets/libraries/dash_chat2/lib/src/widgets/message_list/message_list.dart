@@ -227,6 +227,7 @@ class MessageListState extends State<MessageList> {
     bool topReached =
         scrollController.offset >= scrollController.position.maxScrollExtent &&
             !scrollController.position.outOfRange;
+
     if (topReached &&
         widget.messageListOptions.onLoadEarlier != null &&
         !isLoadingMore) {
@@ -241,10 +242,10 @@ class MessageListState extends State<MessageList> {
     } else if (scrollController.offset > 200) {
       showScrollToBottom();
     } else {
-      if (scrollController.position.maxScrollExtent > 0) {
-        showScrollToBottom();
-      } else {
+      if (scrollController.offset < 0.1) {
         hideScrollToBottom();
+      } else if (scrollController.position.maxScrollExtent > 0) {
+        showScrollToBottom();
       }
     }
   }

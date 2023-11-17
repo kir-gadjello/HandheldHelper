@@ -130,6 +130,34 @@ class LLamaRPC {
   late final _async_completion_cancel = _async_completion_cancelPtr
       .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
 
+  ffi.Pointer<ffi.Char> save_state(
+    ffi.Pointer<ffi.Char> req_json,
+  ) {
+    return _save_state(
+      req_json,
+    );
+  }
+
+  late final _save_statePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>>('save_state');
+  late final _save_state = _save_statePtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
+  ffi.Pointer<ffi.Char> load_state(
+    ffi.Pointer<ffi.Char> req_json,
+  ) {
+    return _load_state(
+      req_json,
+    );
+  }
+
+  late final _load_statePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>>('load_state');
+  late final _load_state = _load_statePtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)>();
+
   void deinit() {
     return _deinit();
   }
