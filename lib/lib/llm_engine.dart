@@ -1,10 +1,12 @@
 import 'dart:convert' show jsonEncode, jsonDecode;
 import 'dart:ffi' as ffi;
 import 'dart:io' show File, Directory, Platform, FileSystemEntity;
-import 'dart:ui';
+// import 'dart:ui';
+// import 'package:handheld_helper/gguf.dart';
 import 'package:path/path.dart' as Path;
 import 'package:ffi/ffi.dart';
 import 'dart:async';
+import 'package:crypto/crypto.dart';
 
 import 'llamarpc_generated_bindings.dart' as binding;
 
@@ -13,6 +15,18 @@ const String LLAMA_SO = "librpcserver";
 const bool __DEBUG = false;
 
 const _IM_END_ = ["<|im_end|>"];
+
+typedef VoidCallback = void Function();
+
+String getFileHash(String filePath) {
+  var file = File(filePath);
+  if (!(file.existsSync())) {
+    return "<file not found>";
+  }
+  var bytes = file.readAsBytesSync();
+  var digest = sha1.convert(bytes);
+  return digest.toString();
+}
 
 class LLAMAChatCompletion {
   String prompt = "";
@@ -43,6 +57,11 @@ class AIChatMessage {
   DateTime createdAt;
 
   AIChatMessage(this.role, this.content) : createdAt = DateTime.now();
+
+  @override
+  String toString() {
+    return "AIChatMessage<role=$role, content=$content>";
+  }
 }
 
 String format_chatml(List<AIChatMessage> messages,
@@ -175,13 +194,12 @@ void printTree(Directory dir, [int depth = 0]) {
 String? resolve_shared_library_path(String libname) {
   var binDir = Path.dirname(Platform.resolvedExecutable);
   print("resolve_shared_library_path $binDir $libname");
-  // print("FILES: ");
-  // printTree(Directory.current);
 
   // Define possible system directories where shared libraries can be located
   List<String> directories = [
     "",
     binDir,
+    "native",
     'lib/arm64-v8a/',
     'arm64-v8a/',
     Path.join(binDir, 'lib/arm64-v8a/'),
@@ -275,6 +293,7 @@ class LLMEngine {
   }
 
   late binding.LLamaRPC rpc;
+  late String _libpath;
 
   LLMEngine(
       {this.postpone_init = false,
@@ -282,8 +301,6 @@ class LLMEngine {
       this.modelpath = "",
       this.onInitDone,
       this.llama_init_json}) {
-    String _libpath;
-
     if (libpath != null && File(libpath!).existsSync()) {
       _libpath = libpath!;
     } else {
@@ -302,8 +319,13 @@ class LLMEngine {
 
     libpath = _libpath;
 
-    rpc = binding.LLamaRPC(
-        ffi.DynamicLibrary.open(_libpath ?? "librpcserver.so"));
+    if (Platform.environment.containsKey("TEST") ||
+        Platform.environment.containsKey("DEVELOPMENT")) {
+      print("$libpath SHA1: ${getFileHash(libpath!)}");
+    }
+
+    rpc =
+        binding.LLamaRPC(ffi.DynamicLibrary.open(libpath ?? "librpcserver.so"));
 
     if (kDebugMode && rpc != null) {
       print("[OK] Loaded shared library... $libpath");
@@ -339,6 +361,7 @@ class LLMEngine {
 
     if (sysinfo['init_success'] == 1) {
       initialized = true;
+      state = LLMEngineState.INITIALIZED_SUCCESS;
     } else if (sysinfo['init_success'] == -1) {
       initialized = false;
       state = LLMEngineState.INITIALIZED_FAILURE;
@@ -372,11 +395,14 @@ class LLMEngine {
 
   bool initialize(
       {required String modelpath,
+      auto_ctxlen = false,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
       VoidCallback? onInitDone,
       VoidCallback? Function(double)? onProgressUpdate}) {
     if (state == LLMEngineState.INITIALIZED_SUCCESS) {
+      print(
+          "LLM Engine warning: intialize() called on intialized engine, performing deinitialize() first");
       deinitialize();
     }
 
@@ -399,13 +425,13 @@ class LLMEngine {
         });
       }
 
-      if (modelpath.toLowerCase().contains("mistral") &&
-          init_json['n_ctx'] == null) {
-        init_json['n_ctx'] = 8192;
-      }
+      // if (modelpath.toLowerCase().contains("mistral") &&
+      //     init_json['n_ctx'] == null) {
+      //   init_json['n_ctx'] = 8192;
+      // }
 
       if (non_blocking) {
-        n_ctx = init_json['n_ctx'] ?? 1024;
+        n_ctx = init_json['n_ctx'] ?? 2048;
 
         print("USING INIT PARAMS = $init_json");
         print("USING CONTEXT LENGTH = $n_ctx");
@@ -500,6 +526,15 @@ class LLMEngine {
         .toDartString();
 
     return Tokenized.fromJson(jsonDecode(api_resp));
+  }
+
+  void set_system_prompt(String sys_prompt) {
+    var sys_msg = AIChatMessage("system", sys_prompt);
+    if (msgs.isEmpty) {
+      msgs.add(sys_msg);
+    } else {
+      msgs[0] = sys_msg;
+    }
   }
 
   bool advance({String? user_msg, bool fix_chatml = true}) {
@@ -683,8 +718,11 @@ class LLMEngine {
     }
   }
 
-  void deinitialize() {
+  void deinitialize({bool reload_shared_library = false}) {
     rpc.deinit();
+    if (reload_shared_library && _libpath != null) {
+      rpc = binding.LLamaRPC(ffi.DynamicLibrary.open(_libpath!));
+    }
     state = LLMEngineState.NOT_INITIALIZED;
     reinitState();
   }

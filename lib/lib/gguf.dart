@@ -125,7 +125,9 @@ Future<Map<String, dynamic>?> parseGGUF(String path,
     {Set<String>? findKeys}) async {
   final _keys = findKeys != null ? Set.from(findKeys) : null;
   final file = File(path);
-  final raf = await file.open();
+
+  RandomAccessFile raf = await file.open();
+
   final magicNumberBuffer = await raf.read(4);
   final magicNumber =
       magicNumberBuffer.buffer.asByteData().getUint32(0, Endian.big);

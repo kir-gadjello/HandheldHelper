@@ -5,7 +5,7 @@ rm -rf build;
 mkdir build;
 cd build;
 cmake .. -DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1
-cmake --build . --config Release --target rpcserver server_oaicompat;
+cmake --build . --config Release --target rpcserver; # server_oaicompat;
 cd ..;
 
 cp ./build/examples/server/librpcserver.dylib ../handheld_helper/native/

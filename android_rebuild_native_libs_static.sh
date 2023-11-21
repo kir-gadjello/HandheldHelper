@@ -11,7 +11,7 @@ cmake -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/25.2.9519653/build/cmake/android
 -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-23 \
 -DCMAKE_C_FLAGS=-march=armv8.4a+dotprod -D__ARM_FEATURE_DOTPROD=1 -DLLAMA_LTO=1 \
 -DBUILD_SHARED_LIBS=0 -DSERVER_VERBOSE=1 -DLLAMA_SERVER_VERBOSE=1 ..
-cmake --build . --config Release --target rpcserver server_oaicompat;
+cmake --build . --config Release --target rpcserver; # server_oaicompat;
 cd ..;
 
 cp ./build-arm64-v8a-static/examples/server/librpcserver.so ../handheld_helper/native/arm64-v8a

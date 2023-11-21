@@ -162,3 +162,23 @@ int? parse_numeric_shorthand(dynamic x, {int? fallback, bool decimal = false}) {
     return fallback;
   }
 }
+
+int? extract_ctxlen_from_name(String s) {
+  final intRegex = RegExp(r'\d+');
+  final intWithSuffixRegex = RegExp(r'\d+[kK]');
+
+  var match = intWithSuffixRegex.firstMatch(s);
+  if (match != null) {
+    return parseStringWithSuffix(match.group(0)!);
+  }
+
+  match = intRegex.firstMatch(s);
+  if (match != null) {
+    var x = int.parse(match.group(0)!);
+    if (x > 512) {
+      return x;
+    }
+  }
+
+  return null;
+}

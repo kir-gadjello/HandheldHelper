@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:handheld_helper/db.dart';
+import 'package:handheld_helper/gguf.dart';
 import 'package:path/path.dart' as Path;
 import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
@@ -39,6 +40,8 @@ const WorkspaceRoot = "HHH";
 const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 const SEND_SHIFT_ENTER = true;
+const DEFAULT_CTXLEN = 2048;
+final MAX_CTXLEN = int.parse(Platform.environment?["MAXCTX"] ?? "8192");
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
@@ -703,12 +706,14 @@ class HHHDefaults {
   }
 }
 
-String resolve_llm_file(RootAppParams p) {
-  if (Path.basename(p.default_model) != p.default_model) {
-    return p.default_model;
+String resolve_llm_file(RootAppParams p, {String? model_file}) {
+  var model_to_resolve = (model_file == null) ? p.default_model : model_file;
+
+  if (Path.basename(model_to_resolve) != model_to_resolve) {
+    return model_to_resolve;
   }
 
-  var ret = Path.join(p.hhh_dir, "Models", p.default_model);
+  var ret = Path.join(p.hhh_dir, "Models", model_to_resolve);
   const fcand = (String.fromEnvironment("MODELPATH") ?? "");
   final env_cand = (Platform.environment["MODELPATH"] ?? "");
   if (fcand.isNotEmpty && File(fcand).existsSync()) {
@@ -1027,24 +1032,31 @@ class Settings {
   }
 }
 
-Map<String, dynamic> resolve_init_json() {
-  var s = String.fromEnvironment("LLAMA_INIT_JSON") ?? "";
+Map<String, dynamic> resolve_init_json({int? n_ctx}) {
+  var s = const String.fromEnvironment("LLAMA_INIT_JSON") ?? "";
+  Map<String, dynamic> ret;
+
   if (s.isNotEmpty) {
-    return jsonDecode(s);
+    ret = jsonDecode(s);
   }
 
   s = Platform.environment["LLAMA_INIT_JSON"] ?? "";
   if (s.isNotEmpty) {
-    return jsonDecode(s);
+    ret = jsonDecode(s);
   }
 
   s = "./llama_init.json";
   dlog("MODEL: probing $s");
   if (File(s).existsSync()) {
-    return jsonDecode(File(s).readAsStringSync());
+    ret = jsonDecode(File(s).readAsStringSync());
   }
 
-  return {};
+  ret = {};
+  if (n_ctx != null) {
+    ret["n_ctx"] = n_ctx;
+  }
+
+  return ret;
 }
 
 class CollapsibleWidget extends StatefulWidget {
@@ -2334,6 +2346,31 @@ LLMEngine llm = LLMEngine();
 //   abort() {}
 // }
 
+Future<int> resolve_native_ctxlen(String new_modelpath) async {
+  Map<String, dynamic>? metadata;
+  try {
+    metadata =
+        await parseGGUF(new_modelpath, findKeys: {"llama.context_length"});
+  } catch (e) {
+    print("Error in parseGGUF: $e");
+  }
+
+  var model_filename = Path.basename(new_modelpath);
+
+  int native_ctxlen = extract_ctxlen_from_name(new_modelpath) ??
+      (metadata?["llama.context_length"] ?? DEFAULT_CTXLEN);
+
+  if (APPROVED_LLMS.map((m) => m.getFileName()).contains(model_filename)) {
+    var maybeApprovedLLM =
+        APPROVED_LLMS.firstWhere((m) => m.getFileName() == model_filename);
+    if (maybeApprovedLLM != null && maybeApprovedLLM.native_ctxlen != null) {
+      native_ctxlen = maybeApprovedLLM.native_ctxlen!;
+    }
+  }
+
+  return native_ctxlen;
+}
+
 showSnackBarTop(BuildContext context, String msg, {int delay = 750}) {
   var snackBar = SnackBar(
       duration: Duration(milliseconds: delay),
@@ -2473,6 +2510,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   DateTime? _prompt_processing_initiated;
   double llm_load_progress = 0.0;
   bool suspended = false;
+  bool _initial_modelload_done = false;
 
   TextEditingController dashChatInputController = TextEditingController();
   FocusNode dashChatInputFocusNode = FocusNode();
@@ -3038,7 +3076,27 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     });
   }
 
-  void reload_model_from_file(String new_modelpath) async {
+  void reload_model_from_file(
+      String new_modelpath, VoidCallback? onInitDone) async {
+    // final metadata =
+    //     await parseGGUF(new_modelpath, findKeys: {"llama.context_length"});
+    //
+    // int native_ctxlen = extract_ctxlen_from_name(new_modelpath) ??
+    //     metadata?["llama.context_length"] ??
+    //     DEFAULT_CTXLEN;
+    //
+    // var model_filename = Path.basename(new_modelpath);
+    //
+    // if (APPROVED_LLMS.map((m) => m.getFileName()).contains(model_filename)) {
+    //   var maybeApprovedLLM =
+    //       APPROVED_LLMS.firstWhere((m) => m.getFileName() == model_filename);
+    //   if (maybeApprovedLLM != null && maybeApprovedLLM.native_ctxlen != null) {
+    //     native_ctxlen = maybeApprovedLLM.native_ctxlen!;
+    //   }
+    // }
+
+    var native_ctxlen = await resolve_native_ctxlen(new_modelpath);
+
     setState(() {
       _initialized = false;
       _messages = [
@@ -3051,17 +3109,20 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     llm.initialize(
         modelpath: new_modelpath,
-        llama_init_json: resolve_init_json(),
+        llama_init_json:
+            resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
         onProgressUpdate: (double progress) {
           setState(() {
             llm_load_progress = progress;
           });
         },
         onInitDone: () async {
-          await create_new_chat();
+          // await create_new_chat();
           unlock_actions();
+          if (onInitDone != null) {
+            onInitDone();
+          }
         });
-    create_new_chat();
   }
 
   void _update_token_counter(String upd) {
@@ -3074,6 +3135,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   RootAppParams? getAppInitParams() {
     if (_active_app_params != null) return _active_app_params;
     return widget.appInitParams.params;
+  }
+
+  String? getDefaultLLM() {
+    var params = getAppInitParams();
+    if (params != null) {
+      return params.default_model;
+    }
   }
 
   bool app_setup_done() {
@@ -3104,7 +3172,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     });
   }
 
-  void initAIifNotAlready() {
+  Future<void> initAIifNotAlready() async {
+    if (_initial_modelload_done) {
+      return;
+    }
     if (llm.init_in_progress) {
       print("initAIifNotAlready: llm.init_in_progress");
     } else if (!llm.initialized &&
@@ -3113,16 +3184,24 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       print("initAIifNotAlready: llm.init_postponed");
       RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
-      if (Platform.isAndroid) requestStoragePermission();
+      if (Platform.isAndroid) {
+        requestStoragePermission();
+      }
+
+      var modelpath = resolve_llm_file(p);
+      var native_ctxlen = await resolve_native_ctxlen(modelpath);
+
       llm.initialize(
-          modelpath: resolve_llm_file(p),
-          llama_init_json: resolve_init_json(),
+          modelpath: modelpath,
+          llama_init_json:
+              resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
           onProgressUpdate: (double progress) {
             setState(() {
               llm_load_progress = progress;
             });
           },
           onInitDone: () {
+            _initial_modelload_done = true;
             print("ActiveChatDialogState: attempting to restore state...");
             attemptToRestartChat();
             unlock_actions();
@@ -3162,7 +3241,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       if (file.existsSync()) {
         var new_model = file.path;
         dlog("RELOADING FROM $new_model");
-        reload_model_from_file(new_model);
+        lock_actions();
+        cleanup_llm();
+        reload_model_from_file(new_model, () {
+          create_new_chat();
+          unlock_actions();
+        });
       }
     } else {
       // User canceled the picker
@@ -3174,9 +3258,37 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     showSnackBarTop(context, 'Conversation copied to clipboard');
   }
 
-  reset_current_chat() async {
-    llm.clear_state();
-    create_new_chat();
+  cleanup_llm() {
+    llm.deinitialize();
+
+    // TODO: make this unnecessary
+    print("Reloading LLM Engine ...");
+    llm = LLMEngine();
+  }
+
+  ui_create_new_active_chat() async {
+    var defaultLLM = getDefaultLLM();
+    var p = getAppInitParams();
+    if (defaultLLM != null && p != null) {
+      var current_llm = Path.basename(llm.modelpath);
+
+      if (current_llm == defaultLLM) {
+        llm.clear_state();
+        create_new_chat();
+      } else {
+        print("ui_create_new_active_chat(): llm.deinitialize()");
+        cleanup_llm();
+        reload_model_from_file(resolve_llm_file(p, model_file: defaultLLM), () {
+          setState(() {
+            _initialized = true;
+          });
+          create_new_chat();
+        });
+        setState(() {
+          _initialized = false;
+        });
+      }
+    }
   }
 
   stop_llm_generation({now = false}) async {
@@ -3484,7 +3596,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     Icons.add_box_outlined,
                     color: iconColor,
                   ),
-                  onPressed: actionsEnabled ? reset_current_chat : null,
+                  onPressed: actionsEnabled ? ui_create_new_active_chat : null,
                 ),
                 PopupMenuButton<String>(
                   padding: actionIconPadding,
