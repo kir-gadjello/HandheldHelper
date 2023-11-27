@@ -25,6 +25,8 @@ import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:desktop_disk_space/desktop_disk_space.dart';
 import 'package:background_downloader/background_downloader.dart';
 import 'package:filesystem_picker/filesystem_picker.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
@@ -73,6 +75,16 @@ final APPROVED_LLMS = [
   // ])
   // Dolphin 2.2.1 Mistral 7B
   // https://huggingface.co/TheBloke/dolphin-2.2.1-mistral-7B-GGUF/blob/main/dolphin-2.2.1-mistral-7b.Q4_K_M.gguf
+
+  /*
+  https://huggingface.co/afrideva/TinyLlama-1.1B-Chat-v0.6-GGUF
+  # <|system|>
+  # You are a friendly chatbot who always responds in the style of a pirate.</s>
+  # <|user|>
+  # How many helicopters can a human eat in one sitting?</s>
+  # <|assistant|>
+  # ...
+   */
 ];
 
 class HexColor extends Color {
@@ -317,6 +329,54 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
     _controller?.dispose();
     super.dispose();
   }
+}
+
+Widget showWarningModal({
+  required String title,
+  required String content,
+  required String buttonText,
+  VoidCallback? onClose,
+}) {
+  return Dialog(
+    backgroundColor: Colors.transparent,
+    child: Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(
+            Icons.warning,
+            size: 100,
+            color: Colors.orange,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            content,
+            style: TextStyle(fontSize: 18),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            child: Text(buttonText),
+            onPressed: () {
+              if (onClose != null) {
+                onClose();
+              }
+              // Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 Future<File> moveFile(File sourceFile, String newPath) async {
@@ -2498,6 +2558,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   Timer? _msg_poll_timer;
   Settings settings = Settings();
   bool _initialized = false;
+  bool _needs_restore = true;
   Timer? _token_counter_sync;
   int _input_tokens = 0;
   Chat? _current_chat;
@@ -2517,11 +2578,50 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
+  var _modalState;
+
+  void _showWarningModal({
+    String title = 'Warning',
+    String content = 'Default warning message.',
+    String buttonText = 'OK',
+    VoidCallback? onClose,
+  }) {
+    setState(() {
+      _modalState = {
+        'title': title,
+        'content': content,
+        'buttonText': buttonText,
+        'onClose': () {
+          setState(() {
+            _modalState = null;
+          });
+          if (onClose != null) {
+            onClose();
+          }
+        },
+      };
+    });
+  }
+
+  Widget buildModals(BuildContext context) {
+    if (_modalState != null) {
+      return showWarningModal(
+        title: _modalState['title'],
+        content: _modalState['content'],
+        buttonText: _modalState['buttonText'],
+        onClose: _modalState['onClose'],
+      );
+    } else {
+      return Container();
+    }
+  }
+
   reinitState() {
     _msg_streaming = false;
     _msg_poll_timer;
     settings = Settings();
     _initialized = false;
+    _needs_restore = true;
     _token_counter_sync;
     _input_tokens = 0;
     _current_chat;
@@ -2535,6 +2635,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     llm_load_progress = 0.0;
     suspended = false;
     llama_init_json = resolve_init_json();
+    _modalState = null;
     dashChatInputController.dispose();
     dashChatInputController = TextEditingController();
   }
@@ -2875,16 +2976,24 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  Future<void> create_new_chat({system_prompt = hermes_sysmsg}) async {
+  Future<void> create_new_chat(
+      {system_prompt = hermes_sysmsg,
+      Map<String, dynamic> custom_properties = const {}}) async {
     var firstMsg = ChatMessage(
         text:
             "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', system_prompt)}__",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
-        customProperties: {"_is_system_message_with_prompt": system_prompt});
+        customProperties: {
+          "_is_system_message_with_prompt": system_prompt,
+          "_llm_modelpath": llm.modelpath,
+          ...custom_properties
+        });
 
     _current_chat = await chatManager.createChat(
-        firstMessageText: firstMsg.text, firstMessageUsername: "SYSTEM");
+        firstMessageText: firstMsg.text,
+        firstMessageUsername: "SYSTEM",
+        firstMessageMeta: firstMsg.customProperties);
 
     _messages = [firstMsg];
 
@@ -3107,6 +3216,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       ];
     });
 
+    print("llm.initialize [2]: $new_modelpath");
     llm.initialize(
         modelpath: new_modelpath,
         llama_init_json:
@@ -3116,13 +3226,33 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             llm_load_progress = progress;
           });
         },
-        onInitDone: () async {
-          // await create_new_chat();
-          unlock_actions();
-          if (onInitDone != null) {
-            onInitDone();
+        onInitDone: (success) async {
+          if (success) {
+            // await create_new_chat();
+            unlock_actions();
+            if (onInitDone != null) {
+              onInitDone();
+            }
+          } else {
+            // TODO: handle init failure
+            _showWarningModal(
+                content:
+                    "Could not load the model at $new_modelpath\nSystem will try to load the default model when you dismiss this modal.",
+                onClose: () {
+                  load_default_model();
+                });
           }
         });
+  }
+
+  void load_default_model({void Function(bool)? onInitDone}) {
+    if (llm.initialized) {
+      llm.deinitialize();
+    }
+    initAIifNotAlready(
+        force_default_model: true,
+        attempt_restore_chat: false,
+        onInitDone: onInitDone);
   }
 
   void _update_token_counter(String upd) {
@@ -3157,8 +3287,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   void attemptToRestartChat() {
+    if (!_needs_restore) {
+      print("attemptToRestartChat(): already tried, avoding restore");
+      _initialized = true;
+      return;
+    }
     print("ActiveChatDialogState: attemptToRestartChat()...");
     restoreState().then((success) {
+      _needs_restore = false;
       if (!success) {
         print("[ERROR] RESTORE FAILED, CREATING NEW CHAT");
         create_new_chat();
@@ -3172,25 +3308,88 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     });
   }
 
-  Future<void> initAIifNotAlready() async {
-    if (_initial_modelload_done) {
+  Future<String?> attemptToRestoreChatModelPath() async {
+    try {
+      var data = await metaKV.getMetadata("_persist_active_chat_state");
+      if (data == null) {
+        print("PERSISTED CHAT STATE SLOT EMPTY");
+        return null;
+      } else {
+        if (data != null) {
+          Map<String, dynamic> metadata = data as Map<String, dynamic>;
+          if (metadata.containsKey("chat_uuid")) {
+            var msgs = await chatManager
+                .getMessagesFromChat(Uuid.fromJson(data!["chat_uuid"]));
+            if (msgs.isNotEmpty) {
+              print("!!! ${msgs[0]}");
+              if (msgs[0].meta != null &&
+                  msgs[0].meta.containsKey("_is_system_message_with_prompt")) {
+                print("FOUND SYSTEM MESSAGE: ${msgs[0]}");
+                if (msgs[0].meta.containsKey("_llm_modelpath")) {
+                  return msgs[0].meta!["_llm_modelpath"] as String;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print("Exception: $e");
+    }
+    return null;
+  }
+
+  Future<void> initAIifNotAlready(
+      {bool force_default_model = false,
+      bool attempt_restore_chat = true,
+      void Function(bool)? onInitDone}) async {
+    if (!force_default_model && _initial_modelload_done) {
       return;
     }
-    if (llm.init_in_progress) {
+    if (llm.init_in_progress ||
+        llm.state == LLMEngineState.INITIALIZED_SUCCESS ||
+        llm.state == LLMEngineState.INITIALIZED_FAILURE) {
       print("initAIifNotAlready: llm.init_in_progress");
-    } else if (!llm.initialized &&
+      if (llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
+        print("LLM already initialized, unlocking actions");
+        unlock_actions();
+        if (attempt_restore_chat) {
+          attemptToRestartChat();
+        }
+      }
+    } else if (!llm.initialized && // TODO: streamline llm engine states
         llm.init_postponed &&
         getAppInitParams() != null) {
       print("initAIifNotAlready: llm.init_postponed");
-      RootAppParams p = getAppInitParams()!;
       print("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) {
         requestStoragePermission();
       }
 
-      var modelpath = resolve_llm_file(p);
+      RootAppParams p = getAppInitParams()!;
+
+      bool fallback = false;
+      var default_modelpath = resolve_llm_file(p);
+      String modelpath = default_modelpath;
+      String? chat_modelpath = await attemptToRestoreChatModelPath();
+
+      if (!force_default_model && chat_modelpath != null) {
+        if (File(chat_modelpath).existsSync()) {
+          print("RESTORING CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
+          modelpath = chat_modelpath;
+        } else {
+          print(
+              "WARNING COULD NOT ACCESS CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
+          print("FALLBACK TO DEFAULT MODEL");
+          fallback = true;
+        }
+      } else {
+        print("LOADING DEFAULT MODEL: $default_modelpath");
+      }
+
       var native_ctxlen = await resolve_native_ctxlen(modelpath);
 
+      print("llm.initialize [1]: $modelpath");
       llm.initialize(
           modelpath: modelpath,
           llama_init_json:
@@ -3200,11 +3399,32 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               llm_load_progress = progress;
             });
           },
-          onInitDone: () {
-            _initial_modelload_done = true;
-            print("ActiveChatDialogState: attempting to restore state...");
-            attemptToRestartChat();
-            unlock_actions();
+          onInitDone: (success) {
+            if (success) {
+              _initial_modelload_done = true;
+              print("ActiveChatDialogState: attempting to restore state...");
+              if (!attempt_restore_chat || fallback) {
+                // custom model could not be loaded, the history would be, strictly speaking, invalid
+                create_new_chat();
+              } else {
+                if (attempt_restore_chat) {
+                  attemptToRestartChat();
+                }
+              }
+              unlock_actions();
+            } else {
+              // TODO: handle failure better
+              _initial_modelload_done = false;
+              _showWarningModal(
+                  content:
+                      "Could not load the model at $modelpath\nSystem will try to load the default model when you dismiss this modal.",
+                  onClose: () {
+                    load_default_model();
+                  });
+            }
+            if (onInitDone != null) {
+              onInitDone(success);
+            }
           });
     } else if (llm.initialized && !_initialized) {
       print("initAIifNotAlready: llm.initialized && !_initialized");
@@ -3266,16 +3486,16 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     llm = LLMEngine();
   }
 
-  ui_create_new_active_chat() async {
+  ui_create_new_active_chat({bool force_default_llm = false}) async {
     var defaultLLM = getDefaultLLM();
     var p = getAppInitParams();
     if (defaultLLM != null && p != null) {
       var current_llm = Path.basename(llm.modelpath);
 
-      if (current_llm == defaultLLM) {
-        llm.clear_state();
-        create_new_chat();
-      } else {
+      print(
+          "ui_create_new_active_chat(): current_llm=$current_llm, defaultLLM=$defaultLLM");
+
+      if (false && force_default_llm && current_llm != defaultLLM) {
         print("ui_create_new_active_chat(): llm.deinitialize()");
         cleanup_llm();
         reload_model_from_file(resolve_llm_file(p, model_file: defaultLLM), () {
@@ -3287,6 +3507,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         setState(() {
           _initialized = false;
         });
+      } else {
+        llm.clear_state();
+        create_new_chat();
       }
     }
   }
@@ -3310,7 +3533,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  show_settings_menu() {
+  ui_show_settings_menu() {
     // TODO
   }
 
@@ -3536,6 +3759,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       mainWidget = buildAppSetupScreen();
     }
 
+    if (_modalState != null) {
+      var underlying = mainWidget;
+      mainWidget = Stack(children: [buildModals(context), underlying]);
+    }
+
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildDrawer(context),
@@ -3586,7 +3814,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     Icons.psychology_sharp,
                     color: iconColor,
                   ),
-                  onPressed: actionsEnabled ? show_settings_menu : null,
+                  onPressed: actionsEnabled ? ui_show_settings_menu : null,
                 ),
                 IconButton(
                   padding: actionIconPadding,
@@ -4231,12 +4459,57 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   }
 }
 
-class SettingsPage extends StatefulWidget {
+class SettingsNotifier extends StateNotifier<Map<String, dynamic>> {
+  final MetadataManager _metadataManager = MetadataManager();
+
+  SettingsNotifier() : super({});
+
+  Future<void> updateSettings(Map<String, dynamic> newSettings) async {
+    await persist(newSettings);
+    state = newSettings;
+  }
+
+  Future<void> persist(Map<String, dynamic> settings) async {
+    await _metadataManager.setMetadata("_app_settings", settings);
+  }
+
+  Future<void> restore() async {
+    // Your async restore logic here
+    final restoredSettings = await restoreSettings();
+    state = restoredSettings;
+  }
+
+  Future<Map<String, dynamic>> restoreSettings() async {
+    // Your logic to restore settings here
+    return _metadataManager.getMetadata("_app_settings", defaultValue: {})
+        as Map<String, dynamic>;
+  }
+}
+
+final settingsProvider =
+    StateNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
+        (ref) => SettingsNotifier());
+
+final persistSettingsProvider = FutureProvider.autoDispose
+    .family<void, Map<String, dynamic>>((ref, newSettings) async {
+  final settingsNotifier = ref.watch(settingsProvider.notifier);
+  await settingsNotifier.persist(newSettings);
+  settingsNotifier.state = newSettings;
+});
+
+final restoreSettingsProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final settingsNotifier = ref.watch(settingsProvider.notifier);
+  await settingsNotifier.restore();
+  return settingsNotifier.state;
+});
+
+class SettingsPage extends ConsumerStatefulWidget {
   @override
   _SettingsPageState createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage> {
   final MetadataManager _metadataManager = MetadataManager();
   final TextEditingController _userMessageColorController =
       TextEditingController();
@@ -4246,82 +4519,131 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
+    final persistSettings = ref.watch(persistSettingsProvider(settings));
+    final restoreSettings = ref.watch(restoreSettingsProvider);
+
     double screenWidth = MediaQuery.of(context).size.width;
+    double screenHeight = MediaQuery.of(context).size.height;
+
     var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
-    var fgColor = Theme.of(context).appBarTheme.foregroundColor!;
     var bgColor2 = Colors.black;
+    var formBgColor = Colors.grey.lighter(50); // getUserMsgColor(context);
+    var formBgColorLighter = formBgColor.lighter(30);
+    var lighterBgColor = Theme.of(context).colorScheme.secondary;
+    var fgColor =
+        Colors.black; // Theme.of(context).appBarTheme.foregroundColor!;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+    var hintColor = Theme.of(context).hintColor;
 
     return Scaffold(
         drawer: _buildDrawer(context),
-        appBar: AppBar(backgroundColor: bgColor, title: Text("Settings")),
-        body: Container(
-            width: screenWidth,
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height,
-            ),
-            child: SafeArea(
+        appBar: AppBar(backgroundColor: bgColor, title: const Text("Settings")),
+        body: Center(
+            child: Container(
+                padding: const EdgeInsets.all(20.0),
+                decoration: BoxDecoration(
+                    color: formBgColor,
+                    borderRadius: BorderRadius.circular(8.0)),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height,
+                  maxWidth: isMobile()
+                      ? MediaQuery.of(context).size.width * 0.95
+                      : 820.0,
+                ),
                 child: SingleChildScrollView(
                     child: FastForm(
-                        formKey: _formKey,
-                        onChanged: (m) {
-                          print("Settings form updated: $m");
-                        },
-                        children: [
-                  FastFormSection(
-                      header: const Text('My Form'),
-                      padding: EdgeInsets.all(16.0),
+                  onChanged: (data) {
+                    // persistSettings.
+                  },
+                  adaptive: false,
+                  formKey: _formKey,
+                  children: [
+                    Column(
                       children: [
-                        // Column(children: [
-                        FastSwitch(
-                          name: 'dark_theme',
-                          labelText: 'Dark theme',
-                          onChanged: (value) {
-                            _metadataManager.setMetadata('dark_theme', value);
-                          },
-                        ),
-                        // FastDropdown<String>(
-                        //   name: 'default_model',
-                        //   labelText: 'Default Model',
-                        //   items: ['Model 1', 'Model 2', 'Model 3'],
-                        //   initialValue: 'Model 1',
-                        //   onChanged: (value) {
-                        //     _metadataManager.setMetadata(
-                        //         'default_model', value);
-                        //   },
-                        // ),
-                        // FastDropdown<String>(
-                        //   name: 'default_system_prompt',
-                        //   labelText: 'Default System Prompt',
-                        //   items: ['Basic', 'Prompt 2', 'Prompt 3'],
-                        //   initialValue: 'Basic',
-                        //   onChanged: (value) {
-                        //     _metadataManager.setMetadata(
-                        //         'default_system_prompt', value);
-                        //   },
-                        // ),
-                        // FastTextField(
-                        //   name: 'user_message_color',
-                        //   labelText: 'User Message Color',
-                        //   onChanged: (value) {
-                        //     if (value != null && HexColor.isHexColor(value)) {
-                        //       _metadataManager.setMetadata(
-                        //           'user_message_color', value);
-                        //     }
-                        //   },
-                        // ),
-                        // FastTextField(
-                        //   name: 'ai_message_color',
-                        //   labelText: 'AI Message Color',
-                        //   onChanged: (value) {
-                        //     _metadataManager.setMetadata(
-                        //         'ai_message_color', value);
-                        //   },
-                        // ),
-                        // ])
-                      ])
-                ])))));
+                        FastFormSection(children: [
+                          FastDropdown<String>(
+                            dropdownColor: formBgColor,
+                            name: 'default_model',
+                            labelText: 'Default Model',
+                            items: ['Model 1', 'Model 2', 'Model 3'],
+                            initialValue: 'Model 1',
+                            onChanged: (value) {
+                              _metadataManager.setMetadata(
+                                  'default_model', value);
+                            },
+                            style: TextStyle(color: fgColor),
+                          ),
+                          FastDropdown<String>(
+                            dropdownColor: formBgColor,
+                            name: 'default_system_prompt',
+                            labelText: 'Default system prompt',
+                            items: ['Prompt 1', 'Prompt 2', 'Prompt 3'],
+                            initialValue: 'Prompt 1',
+                            onChanged: (value) {
+                              _metadataManager.setMetadata(
+                                  'default_system_prompt', value);
+                            },
+                            style: TextStyle(color: fgColor),
+                          ),
+                          FastTextField(
+                            name: 'max_context_size',
+                            labelText: 'Max context size',
+                            style: TextStyle(color: fgColor),
+                            placeholderStyle:
+                                TextStyle(color: fgColor.darker(30)),
+                          ),
+                          FastTextField(
+                            name: 'userMessageColor',
+                            labelText: 'User Message Color',
+                            style: TextStyle(color: fgColor),
+                            placeholderStyle:
+                                TextStyle(color: fgColor.darker(30)),
+                          ),
+                          FastTextField(
+                            name: 'aiMessageColor',
+                            labelText: 'AI Message Color',
+                            style: TextStyle(color: fgColor),
+                            placeholderStyle:
+                                TextStyle(color: fgColor.darker(30)),
+                          ),
+                        ])
+                      ],
+                    )
+                  ],
+                )))));
   }
 }
+
+// FastDropdown<String>(
+//   name: 'default_system_prompt',
+//   labelText: 'Default System Prompt',
+//   items: ['Basic', 'Prompt 2', 'Prompt 3'],
+//   initialValue: 'Basic',
+//   onChanged: (value) {
+//     _metadataManager.setMetadata(
+//         'default_system_prompt', value);
+//   },
+// ),
+// FastTextField(
+//   name: 'user_message_color',
+//   labelText: 'User Message Color',
+//   onChanged: (value) {
+//     if (value != null && HexColor.isHexColor(value)) {
+//       _metadataManager.setMetadata(
+//           'user_message_color', value);
+//     }
+//   },
+// ),
+// FastTextField(
+//   name: 'ai_message_color',
+//   labelText: 'AI Message Color',
+//   onChanged: (value) {
+//     _metadataManager.setMetadata(
+//         'ai_message_color', value);
+//   },
+// ),
+// ])
 
 class LifecycleObserver extends WidgetsBindingObserver {
   @override
@@ -4372,7 +4694,7 @@ List<AppPage> _app_pages = [
   AppPage.search,
   AppPage.history,
   AppPage.settings,
-  AppPage.models,
+  // AppPage.models,
   AppPage.help,
 ];
 
@@ -4567,6 +4889,7 @@ class _PseudoRouter extends State<PseudoRouter> {
       if (onBeforeNavigate != null) {
         onBeforeNavigate();
       }
+      global_current_page = page;
       setState(() {
         _parameters = parameters ?? [];
         _pageStack.add(page);
@@ -4602,7 +4925,7 @@ class _PseudoRouter extends State<PseudoRouter> {
         currentPage = ActiveChatPage(
             title: APP_TITLE, appInitParams: widget.appInitParams);
       case AppPage.settings:
-        currentPage = UnderConstructionWidget(); // SettingsPage();
+        currentPage = SettingsPage();
       case AppPage.search:
         currentPage = SearchPage();
       case AppPage.history:
@@ -4775,5 +5098,5 @@ void main(List<String> args) async {
   }
   dlog("CMD ARGS: ${args.join(',')}");
 
-  runApp(const HandheldHelper());
+  runApp(const ProviderScope(child: HandheldHelper()));
 }

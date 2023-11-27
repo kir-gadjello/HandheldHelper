@@ -266,7 +266,7 @@ class LLMEngine {
   double loading_progress = 0.0;
   bool streaming = false;
   String stream_msg_acc = "";
-  VoidCallback? onInitDone = null;
+  void Function(bool)? onInitDone = null;
   int tokens_used = 0;
   int n_ctx = 0;
 
@@ -294,6 +294,11 @@ class LLMEngine {
 
   late binding.LLamaRPC rpc;
   late String _libpath;
+
+  @override
+  dispose() {
+    deinitialize();
+  }
 
   LLMEngine(
       {this.postpone_init = false,
@@ -393,16 +398,31 @@ class LLMEngine {
     return 0;
   }
 
+  bool is_initialized() {
+    const init_states = [
+      LLMEngineState.INITIALIZED_SUCCESS,
+      LLMEngineState.INITIALIZED_FAILURE
+    ];
+
+    return !init_in_progress && init_states.contains(state);
+  }
+
   bool initialize(
       {required String modelpath,
       auto_ctxlen = false,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
-      VoidCallback? onInitDone,
+      void Function(bool)? onInitDone,
       VoidCallback? Function(double)? onProgressUpdate}) {
-    if (state == LLMEngineState.INITIALIZED_SUCCESS) {
+    if (init_in_progress) {
       print(
-          "LLM Engine warning: intialize() called on intialized engine, performing deinitialize() first");
+          "LLM ENGINE WARNING: intialize() called on INITIALIZATION IN PROGRESS engine, dismissing.");
+      return false;
+    }
+
+    if (is_initialized()) {
+      print(
+          "LLM ENGINE WARNING: intialize() called on intialized engine, performing deinitialize() first");
       deinitialize();
     }
 
@@ -449,23 +469,30 @@ class LLMEngine {
             print("[OK] Loaded model... $modelpath");
             timer.cancel();
             if (onInitDone != null) {
-              onInitDone();
+              onInitDone(true);
             }
           }
           if (state == LLMEngineState.INITIALIZED_FAILURE) {
+            init_in_progress = false;
             print("Init FAILED at ${DateTime.now()}");
             timer.cancel();
+            if (onInitDone != null) {
+              onInitDone(false);
+            }
           }
         });
       } else {
+        init_in_progress = true;
         initialized = (rpc.init(
                 jsonEncode(init_json ?? {}).toNativeUtf8().cast<ffi.Char>()) ==
             0);
-        print("INITIALIZED: $initialized");
+        init_in_progress = false;
         if (initialized) {
-          if (onInitDone != null) {
-            onInitDone();
-          }
+          state = LLMEngineState.INITIALIZED_SUCCESS;
+        }
+        print("INITIALIZED: $initialized");
+        if (onInitDone != null) {
+          onInitDone(initialized);
         }
       }
 
@@ -479,7 +506,6 @@ class LLMEngine {
       return false;
     }
 
-    state = LLMEngineState.INITIALIZED_SUCCESS;
     return true;
   }
 

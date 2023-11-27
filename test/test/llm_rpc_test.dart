@@ -13,6 +13,7 @@ const COUNT_PROMPT_ELI5 =
     "This is a test. Count from 1 to 3 like a kindergartener, output only the numbers";
 
 void expect_llm_fresh(LLMEngine llm) {
+  expect(llm.init_in_progress, false);
   expect(llm.initialized, true);
   expect(llm.state, LLMEngineState.INITIALIZED_SUCCESS);
   expect(llm.msgs.isEmpty, true);
@@ -74,9 +75,11 @@ void main() async {
   //   test("LOAD (INITIAL)", () async {
   //     llm.initialize(
   //         modelpath: MODEL_SMALL,
-  //         onInitDone: () {
+  //         onInitDone: (success) {
+  //          expect(success, true);
   //           completer.complete();
   //         });
+//       expect(llm.init_in_progress, true);
   //     await completer.future;
   //     completer = Completer<void>();
   //
@@ -128,9 +131,11 @@ void main() async {
     test("LOAD (INITIAL)", () async {
       llm.initialize(
           modelpath: MODEL_LARGE,
-          onInitDone: () {
+          onInitDone: (success) {
+            expect(success, true);
             completer.complete();
           });
+      expect(llm.init_in_progress, true);
       await completer.future;
       completer = Completer<void>();
 
@@ -178,10 +183,12 @@ void main() async {
       completer = Completer<void>();
       llm.initialize(
           modelpath: MODEL_SMALL,
-          onInitDone: () {
+          onInitDone: (success) {
+            expect(success, true);
             print("$MODEL_SMALL: init done");
             completer.complete();
           });
+      expect(llm.init_in_progress, true);
       await completer.future;
       completer = Completer<void>();
 
@@ -205,4 +212,6 @@ void main() async {
       expect(true, true);
     });
   });
+
+  await Future.delayed(const Duration(seconds: 1));
 }

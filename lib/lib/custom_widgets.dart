@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
@@ -9,6 +10,8 @@ import 'package:intl/intl.dart' as intl;
 import 'package:flutter/material.dart' show Icon, Icons;
 
 final USE_MARKDOWN = true;
+
+Set<int> prismErrorHashes = Set<int>();
 
 class CodeSpanBuilder extends MarkdownElementBuilder {
   CodeSpanBuilder({
@@ -89,13 +92,14 @@ Widget MdViewer(
   }
 
   var codeTextColor = extThemeData.codeTextColor!;
+  var codeBgColor = extThemeData.codeBackgroundColor!;
 
   final codeSpanStyle = TextStyle(
     fontFamily: 'JetBrainsMono',
     fontSize: 14,
     height: 1.5,
     color: codeTextColor,
-    backgroundColor: extThemeData.codeBackgroundColor!,
+    backgroundColor: codeBgColor,
     decoration: TextDecoration.none,
     fontWeight: FontWeight.w300,
   );
@@ -124,6 +128,37 @@ Widget MdViewer(
         //     ? const PrismStyle.dark()
         //     : const PrismStyle(),
       );
+
+      // If the set is non-empty, check if the text's hash is in it
+      if (prismErrorHashes.isNotEmpty) {
+        int textHash = text.hashCode;
+        if (prismErrorHashes.contains(textHash)) {
+          return [
+            TextSpan(
+                text: text,
+                style: TextStyle(
+                    color: bgColor, backgroundColor: Colors.transparent))
+          ];
+        }
+      }
+
+      try {
+        return prism.render(text, lang);
+      } catch (e) {
+        int textHash = text.hashCode;
+        // If Prism throws an exception, add the text's hash to the set
+        prismErrorHashes.add(textHash);
+        print(
+            "MARKDOWN ERROR: PRISM FAILED TO RENDER FOR language=${lang} hash=$textHash text_len=${text.length} text=\"${text.substring(0, min(128, text.length))}\"");
+      }
+
+      return [
+        TextSpan(
+            text: text,
+            style:
+                TextStyle(color: bgColor, backgroundColor: Colors.transparent))
+      ];
+
       try {
         return prism.render(text, lang);
       } catch (e) {
