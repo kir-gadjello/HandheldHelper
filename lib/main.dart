@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -27,6 +28,7 @@ import 'package:background_downloader/background_downloader.dart';
 import 'package:filesystem_picker/filesystem_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
@@ -2431,6 +2433,72 @@ Future<int> resolve_native_ctxlen(String new_modelpath) async {
   return native_ctxlen;
 }
 
+class CustomButton extends StatefulWidget {
+  const CustomButton(
+    this.textWidget, {
+    this.iconIdle = Icons.copy_rounded,
+    this.iconActivated = Icons.check,
+    this.iconColor,
+    this.onTap,
+    super.key,
+  });
+
+  final Widget textWidget;
+  final Color? iconColor;
+  final VoidCallback? onTap;
+  final IconData iconIdle;
+  final IconData iconActivated;
+
+  @override
+  State<CustomButton> createState() => _CustomButtonState();
+}
+
+class _CustomButtonState extends State<CustomButton> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(30),
+        child: SizedBox(
+          width: 25,
+          height: 25,
+          child: Icon(
+            _copied ? widget.iconActivated : widget.iconIdle,
+            size: 18,
+            color: widget.iconColor ?? const Color(0xff999999),
+          ),
+        ),
+        onTap: () async {
+          final textWidget = widget.textWidget;
+          String text;
+          if (textWidget is RichText) {
+            text = textWidget.text.toPlainText();
+          } else {
+            text = textWidget.toString();
+          }
+          if (widget.onTap != null) {
+            widget.onTap!();
+          }
+          setState(() {
+            _copied = true;
+            Future.delayed(const Duration(seconds: 1)).then((value) {
+              if (mounted) {
+                setState(() {
+                  _copied = false;
+                });
+              }
+            });
+          });
+        },
+      ),
+    );
+  }
+}
+
 showSnackBarTop(BuildContext context, String msg, {int delay = 750}) {
   var snackBar = SnackBar(
       duration: Duration(milliseconds: delay),
@@ -2442,6 +2510,37 @@ showSnackBarTop(BuildContext context, String msg, {int delay = 750}) {
   // Find the ScaffoldMessenger in the widget tree
   // and use it to show a SnackBar.
   ScaffoldMessenger.of(context).showSnackBar(snackBar);
+}
+
+List<String> playablePrefixes = ["<!doctype html>", "<html"];
+
+AutoClearMap<String, bool> playableCache = AutoClearMap(maxAge: 10);
+
+bool isCodePlayable(String? code, {maxCheckLength = 128}) {
+  if (code == null || code.isEmpty || code.trim().isEmpty) {
+    return false;
+  }
+
+  // TODO: more selectivity
+  code = code.trim().toLowerCase();
+
+  code = code.substring(0, min(maxCheckLength, code.length));
+
+  if (playableCache.containsKey(code)) {
+    return playableCache[code]!;
+  }
+
+  bool ret = false;
+
+  for (var p in playablePrefixes) {
+    if (code.startsWith(p)) {
+      ret = true;
+    }
+  }
+
+  playableCache[code] = ret;
+
+  return ret;
 }
 
 void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
@@ -2578,6 +2677,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   Map<String, dynamic> llama_init_json = resolve_init_json();
 
+  String? _htmlCode;
+
   var _modalState;
 
   void _showWarningModal({
@@ -2616,6 +2717,24 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
+  Widget buildCodePlayer(BuildContext context) {
+    if (isMobile() && _htmlCode != null) {
+      // TODO: desktop webview support
+      return Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        width: MediaQuery.of(context).size.width * 0.95,
+        padding: const EdgeInsets.symmetric(vertical: 1.0, horizontal: 2.0),
+        alignment: AlignmentDirectional.center,
+        decoration: const BoxDecoration(
+          color: Colors.lightBlue,
+          borderRadius: BorderRadius.all(Radius.circular(10.0)),
+        ),
+        child: _buildWebView(content: _htmlCode),
+      );
+    }
+    return Container();
+  }
+
   reinitState() {
     _msg_streaming = false;
     _msg_poll_timer;
@@ -2638,6 +2757,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     _modalState = null;
     dashChatInputController.dispose();
     dashChatInputController = TextEditingController();
+    _htmlCode = null;
   }
 
   @override
@@ -3539,6 +3659,127 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   final _scaffoldKey = new GlobalKey<ScaffoldState>();
 
+  Widget _buildWebView({String? content}) {
+    return Container();
+  }
+
+  HttpServer? server;
+
+  startCodeServer() async {
+    server = await HttpServer.bind(InternetAddress.loopbackIPv4, 65123);
+    print("Server running on IP : ${server!.address}On Port : ${server!.port}");
+    await for (var request in server!) {
+      print(
+          "HTTPSERVER REQUEST: ${request.method} ${request.uri.path} $request");
+      if (request.method == "GET" &&
+          request.uri.path == "/code.html" &&
+          _htmlCode != null) {
+        request.response
+          ..headers.contentType = ContentType.html
+          ..write(_htmlCode)
+          ..close();
+      } else {
+        print(
+            "HTTPSERVER UNKNOWN REQUEST: ${request.method} ${request.uri.path} $request");
+      }
+    }
+  }
+
+  void showDesktopStandaloneCodePlayer() async {
+    if (server == null) {
+      startCodeServer();
+    }
+
+    launchURL("http://localhost:65123/code.html");
+  }
+
+  WebViewController? controller;
+
+  void showMobileCodePlayer(String htmlCode) {
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0x00000000))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (int progress) {
+            // Update loading bar.
+          },
+          onPageStarted: (String url) {},
+          onPageFinished: (String url) {},
+          onWebResourceError: (WebResourceError error) {},
+          onNavigationRequest: (NavigationRequest request) {
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
+      ..loadHtmlString(htmlCode, baseUrl: "/");
+
+    Color headerTextColor = Theme.of(context).appBarTheme.foregroundColor!;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+            child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Icon(
+                size: actionIconSize,
+                Icons.settings_applications,
+                color: headerTextColor,
+              ),
+              Expanded(
+                child: Text(
+                  'HHH Code Runner',
+                  style: TextStyle(color: headerTextColor, fontSize: 20),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ]),
+            Container(
+                padding: const EdgeInsets.all(10),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.6,
+                ),
+                child: Expanded(
+                  child: WebViewWidget(controller: controller!),
+                )),
+          ],
+        ));
+      },
+    );
+  }
+
+  void showCodePlayer(String htmlCode) {
+    _htmlCode = htmlCode;
+
+    if (isMobile()) {
+      showMobileCodePlayer(htmlCode);
+    } else {
+      showDesktopStandaloneCodePlayer();
+    }
+    setState(() {});
+  }
+
+  List<Widget> attemptToShowCodePlayAction(String? code) {
+    if (code == null || !isCodePlayable(code)) {
+      return const [];
+    }
+
+    return [
+      CustomButton(const Text("Play"), iconIdle: Icons.play_arrow, onTap: () {
+        print("CODE PLAY: $code");
+        showCodePlayer(code);
+      })
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -3698,6 +3939,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               textColor: textColor!,
               currentUserTextColor: textColor!,
               messageTextBuilder: customMessageTextBuilder,
+              buildCodeBlockActions: attemptToShowCodePlayAction,
               showCurrentUserAvatar: false,
               showOtherUsersAvatar: false,
               onLongPressMessage: (m) {
@@ -3757,11 +3999,6 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       }
     } else {
       mainWidget = buildAppSetupScreen();
-    }
-
-    if (_modalState != null) {
-      var underlying = mainWidget;
-      mainWidget = Stack(children: [buildModals(context), underlying]);
     }
 
     return Scaffold(
@@ -3871,10 +4108,19 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[mainWidget],
-        ),
+        child: (_htmlCode != null || _modalState != null)
+            ? Stack(children: [
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[mainWidget],
+                ),
+                // buildCodePlayer(context),
+                buildModals(context),
+              ])
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[mainWidget],
+              ),
       ),
       // floatingActionButton: FloatingActionButton(
       //   onPressed: _incrementCounter,

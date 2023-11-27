@@ -8,6 +8,7 @@ import 'package:handheld_helper/flutter_customizations.dart';
 import 'package:markdown_viewer/markdown_viewer.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:flutter/material.dart' show Icon, Icons;
+import 'package:markdown_viewer/src/builders/code_block_builder.dart';
 
 final USE_MARKDOWN = true;
 
@@ -65,6 +66,49 @@ class CodeSpanBuilder extends MarkdownElementBuilder {
   }
 }
 
+List<TextSpan> Function(String, String?, String?)
+    createMarkdownHighlightBuilder(Color textColor) =>
+        (text, language, infoString) {
+          final lang = language ?? 'plain';
+          final prism = Prism(
+            mouseCursor: SystemMouseCursors.text,
+            style: const PrismStyle.dark(),
+            // style: Theme.of(context).scaffoldBackgroundColor == Colors.black
+            //     ? const PrismStyle.dark()
+            //     : const PrismStyle(),
+          );
+
+// If the set is non-empty, check if the text's hash is in it
+          if (prismErrorHashes.isNotEmpty) {
+            int textHash = text.hashCode;
+            if (prismErrorHashes.contains(textHash)) {
+              return [
+                TextSpan(
+                    text: text,
+                    style: TextStyle(
+                        color: textColor, backgroundColor: Colors.transparent))
+              ];
+            }
+          }
+
+          try {
+            return prism.render(text, lang);
+          } catch (e) {
+            int textHash = text.hashCode;
+// If Prism throws an exception, add the text's hash to the set
+            prismErrorHashes.add(textHash);
+            print(
+                "MARKDOWN ERROR: PRISM FAILED TO RENDER FOR language=${lang} hash=$textHash text_len=${text.length} text=\"${text.substring(0, min(128, text.length))}\"");
+          }
+
+          return [
+            TextSpan(
+                text: text,
+                style: TextStyle(
+                    color: textColor, backgroundColor: Colors.transparent))
+          ];
+        };
+
 Widget MdViewer(
     String data,
     BuildContext context,
@@ -110,6 +154,15 @@ Widget MdViewer(
       fontFamily: 'JetBrainsMono',
       backgroundColor: Colors.transparent);
 
+  var styleSheet = MarkdownStyle(
+      textStyle:
+          TextStyle(color: textColor, height: 1.4, backgroundColor: bgColor),
+      listItemMarkerTrailingSpace: 12,
+      codeSpan: codeSpanStyle,
+      codeBlock: codeBlockStyle);
+
+  var highlighter = createMarkdownHighlightBuilder(bgColor);
+
   return MarkdownViewer(
     data,
     enableTaskList: true,
@@ -119,69 +172,26 @@ Widget MdViewer(
     enableImageSize: false,
     enableKbd: false,
     // syntaxExtensions: [ExampleSyntax()],
-    highlightBuilder: (text, language, infoString) {
-      final lang = language ?? 'plain';
-      final prism = Prism(
-        mouseCursor: SystemMouseCursors.text,
-        style: PrismStyle.dark(),
-        // style: Theme.of(context).scaffoldBackgroundColor == Colors.black
-        //     ? const PrismStyle.dark()
-        //     : const PrismStyle(),
-      );
-
-      // If the set is non-empty, check if the text's hash is in it
-      if (prismErrorHashes.isNotEmpty) {
-        int textHash = text.hashCode;
-        if (prismErrorHashes.contains(textHash)) {
-          return [
-            TextSpan(
-                text: text,
-                style: TextStyle(
-                    color: bgColor, backgroundColor: Colors.transparent))
-          ];
-        }
-      }
-
-      try {
-        return prism.render(text, lang);
-      } catch (e) {
-        int textHash = text.hashCode;
-        // If Prism throws an exception, add the text's hash to the set
-        prismErrorHashes.add(textHash);
-        print(
-            "MARKDOWN ERROR: PRISM FAILED TO RENDER FOR language=${lang} hash=$textHash text_len=${text.length} text=\"${text.substring(0, min(128, text.length))}\"");
-      }
-
-      return [
-        TextSpan(
-            text: text,
-            style:
-                TextStyle(color: bgColor, backgroundColor: Colors.transparent))
-      ];
-
-      try {
-        return prism.render(text, lang);
-      } catch (e) {
-        print("MARKDOWN ERROR: PRISMx FAILED TO RENDER FOR language=${lang}");
-      }
-      return [
-        TextSpan(text: text, style: TextStyle(backgroundColor: Colors.blueGrey))
-      ];
-    },
+    highlightBuilder: highlighter,
     onTapLink: (href, title) {
       print({href, title});
     },
     elementBuilders: [
       CodeSpanBuilder(textStyle: codeSpanStyle),
+      CodeBlockBuilder(
+        context: context,
+        textStyle: codeBlockStyle,
+        padding: styleSheet.codeblockPadding,
+        decoration: styleSheet.codeblockDecoration,
+        buttonsBuilder: messageOptions.buildCodeBlockActions,
+        highlightBuilder: highlighter,
+        // copyIconBuilder: copyIconBuilder,
+        copyIconColor: styleSheet.copyIconColor,
+      ),
     ],
     selectable: true,
     selectionColor: activeColor,
-    styleSheet: MarkdownStyle(
-        textStyle:
-            TextStyle(color: textColor, height: 1.4, backgroundColor: bgColor),
-        listItemMarkerTrailingSpace: 12,
-        codeSpan: codeSpanStyle,
-        codeBlock: codeBlockStyle),
+    styleSheet: styleSheet,
   );
 }
 

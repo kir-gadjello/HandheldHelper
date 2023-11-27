@@ -28,6 +28,7 @@ class MessageOptions {
     this.parsePatterns,
     this.textBeforeMedia = true,
     this.onTapMedia,
+    this.buildCodeBlockActions,
     this.showTime = false,
     this.timeFormat,
     this.messageTimeBuilder,
@@ -203,6 +204,8 @@ class MessageOptions {
   /// Function to call when the user clicks on a media
   /// Will not work with the default video player
   final void Function(ChatMedia media)? onTapMedia;
+
+  final List<Widget> Function(String? s)? buildCodeBlockActions;
 
   /// Border radius of the chat bubbles
   ///

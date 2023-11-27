@@ -2,6 +2,7 @@
 // import 'dart:convert';
 // import 'dart:async';
 import 'dart:io';
+import 'dart:collection';
 import 'dart:ui';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -181,4 +182,63 @@ int? extract_ctxlen_from_name(String s) {
   }
 
   return null;
+}
+
+class _AutoClearMapEntry<V> {
+  final V value;
+  final DateTime addedAt;
+
+  _AutoClearMapEntry(this.value, this.addedAt);
+}
+
+class AutoClearMap<K, V> extends MapBase<K, V> {
+  final Map<K, _AutoClearMapEntry<V>> _map = {};
+  final int maxAge;
+
+  AutoClearMap({required this.maxAge});
+
+  @override
+  V? operator [](Object? key) {
+    final entry = _map[key as K];
+    return entry?.value;
+  }
+
+  @override
+  void operator []=(K key, V value) {
+    _map[key] = _AutoClearMapEntry(value, DateTime.now());
+    cleanUpOldEntries();
+  }
+
+  void cleanUpOldEntries() {
+    _map.removeWhere((key, entry) =>
+        DateTime.now().difference(entry.addedAt).inSeconds > maxAge);
+  }
+
+  @override
+  Iterable<K> get keys => _map.keys.where((key) {
+        final entry = _map[key];
+        return entry == null ||
+            DateTime.now().difference(entry.addedAt).inSeconds <= maxAge;
+      });
+
+  @override
+  Iterable<V> get values => _map.values.map((entry) => entry.value);
+
+  @override
+  Iterable<MapEntry<K, V>> get entries =>
+      _map.entries.map((entry) => MapEntry(entry.key, entry.value.value));
+
+  @override
+  int get length => _map.length;
+
+  @override
+  void clear() {
+    _map.clear();
+  }
+
+  @override
+  V? remove(Object? key) {
+    final entry = _map.remove(key as K);
+    return entry?.value;
+  }
 }

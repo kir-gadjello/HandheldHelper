@@ -181,7 +181,7 @@ void printTree(Directory dir, [int depth = 0]) {
   } catch (e) {
     print("Exception for $dir: $e");
   }
-  for (var entity in (entities ?? [])) {
+  for (var entity in entities) {
     if (entity is Directory) {
       print('${'\t' * depth}Directory: ${entity.path}');
       printTree(entity, depth + 1);
