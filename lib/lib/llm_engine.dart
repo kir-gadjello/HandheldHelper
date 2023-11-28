@@ -11,7 +11,7 @@ import 'package:crypto/crypto.dart';
 import 'llamarpc_generated_bindings.dart' as binding;
 
 const kDebugMode = true;
-const String LLAMA_SO = "librpcserver";
+const LLAMA_SO = "librpcserver";
 const bool __DEBUG = false;
 
 const _IM_END_ = ["<|im_end|>"];
@@ -27,6 +27,20 @@ String getFileHash(String filePath) {
   var digest = sha1.convert(bytes);
   return digest.toString();
 }
+
+class LLMPromptFormat {
+  String name;
+  String separator;
+  String Function(List<AIChatMessage>) formatter;
+  String Function(String) fixer;
+  LLMPromptFormat(
+      {this.name = "chatml",
+      this.separator = "<|im_end|>",
+      this.formatter = format_chatml,
+      this.fixer = fix_chatml_markup});
+}
+
+final ChatMLPromptFormat = LLMPromptFormat();
 
 class LLAMAChatCompletion {
   String prompt = "";
@@ -64,6 +78,39 @@ class AIChatMessage {
   }
 }
 
+String format_minichat(List<AIChatMessage> messages,
+    {bool add_assistant_preprompt = true}) {
+  String ret = "";
+
+  const role_map = {"user": "[|User|]", "assistant": "[|Assistant|]"};
+  // TODO: "system": "[|System|]" ?
+
+  print("DUMP $messages");
+
+  for (final msg in messages) {
+    if (msg.role == "SYSTEM") {
+      ret += "${msg.content}</s>";
+    } else {
+      ret += "${role_map[msg.role] ?? msg.role} ${msg.content}</s>";
+    }
+  }
+  if (add_assistant_preprompt) {
+    ret += "[|Assistant|]";
+  }
+
+  return ret;
+}
+
+String nop_fixer(String x) {
+  return x;
+}
+
+final MiniChatPromptFormat = LLMPromptFormat(
+    name: "minichat",
+    formatter: format_minichat,
+    fixer: create_fixer("</s>"),
+    separator: "</s>");
+
 String format_chatml(List<AIChatMessage> messages,
     {bool add_assistant_preprompt = true}) {
   String ret = "";
@@ -75,6 +122,15 @@ String format_chatml(List<AIChatMessage> messages,
   }
   return ret;
 }
+
+String Function(String) create_fixer(String sep) => (String s) {
+      s = trimLastCharacter(s, sep);
+      var si = s.indexOf(sep);
+      if (si > -1) {
+        s = s.substring(0, si);
+      }
+      return s;
+    };
 
 String fix_chatml_markup(String s) {
   s = trimLastCharacter(s, "<|im_end|>");
@@ -269,6 +325,7 @@ class LLMEngine {
   void Function(bool)? onInitDone = null;
   int tokens_used = 0;
   int n_ctx = 0;
+  late LLMPromptFormat prompt_format;
 
   LLMEngineState state = LLMEngineState.NOT_INITIALIZED;
 
@@ -377,7 +434,7 @@ class LLMEngine {
 
   int? sync_token_count() {
     if (initialized) {
-      var tok = tokenize(format_chatml(msgs));
+      var tok = tokenize(prompt_format.formatter(msgs));
       if (tok.success) {
         tokens_used = tok.length;
         return tokens_used;
@@ -412,6 +469,7 @@ class LLMEngine {
       auto_ctxlen = false,
       non_blocking = true,
       Map<String, dynamic>? llama_init_json,
+      LLMPromptFormat? custom_format,
       void Function(bool)? onInitDone,
       VoidCallback? Function(double)? onProgressUpdate}) {
     if (init_in_progress) {
@@ -429,6 +487,8 @@ class LLMEngine {
     this.modelpath = modelpath;
 
     msgs = [];
+
+    prompt_format = custom_format ?? ChatMLPromptFormat;
 
     try {
       var t0 = DateTime.now();
@@ -579,7 +639,8 @@ class LLMEngine {
     }
 
     try {
-      String api_query = jsonEncode(LLAMAChatCompletion(format_chatml(msgs)));
+      String api_query =
+          jsonEncode(LLAMAChatCompletion(prompt_format.formatter(msgs)));
 
       if (__DEBUG) print("DEBUG: api_query=${api_query}");
 
@@ -595,7 +656,7 @@ class LLMEngine {
       String resp = jsonDecode(api_resp)["content"] as String;
 
       if (fix_chatml) {
-        resp = fix_chatml_markup(resp);
+        resp = prompt_format.fixer(resp);
       }
 
       msgs.add(AIChatMessage("assistant", resp));
@@ -631,7 +692,8 @@ class LLMEngine {
     }
 
     try {
-      String api_query = jsonEncode(LLAMAChatCompletion(format_chatml(msgs)));
+      String api_query =
+          jsonEncode(LLAMAChatCompletion(prompt_format.formatter(msgs)));
 
       if (__DEBUG) print("DEBUG: api_query=${api_query}");
 
@@ -692,7 +754,7 @@ class LLMEngine {
 
       if (stream_update.finished) {
         if (fix_chatml) {
-          stream_msg_acc = fix_chatml_markup(stream_msg_acc);
+          stream_msg_acc = prompt_format.fixer(stream_msg_acc);
         }
 
         msgs.add(AIChatMessage("assistant", stream_msg_acc));

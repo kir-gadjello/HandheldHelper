@@ -72,6 +72,14 @@ final APPROVED_LLMS = [
       sources: [
         "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
       ]),
+  LLMref(
+      name: "MiniChat-1.5-3B",
+      size: 1846655072,
+      ctxlen: "2k",
+      prompt_format: MiniChatPromptFormat,
+      sources: [
+        "https://huggingface.co/afrideva/MiniChat-1.5-3B-GGUF/resolve/main/minichat-1.5-3b.q4_k_m.gguf"
+      ])
   // Not ready yet
   // LLMref(name: 'OpenChat-3.5-16K', size: 4368450304, sources: [
   //   "https://huggingface.co/TheBloke/openchat_3.5-16k-GGUF/resolve/main/openchat_3.5-16k.Q4_K_M.gguf"
@@ -89,6 +97,28 @@ final APPROVED_LLMS = [
   # ...
    */
 ];
+
+LLMPromptFormat resolve_prompt_format(String modelpath) {
+  var name = Path.basename(modelpath);
+
+  var match =
+      APPROVED_LLMS.indexWhere((element) => element.getFileName() == name);
+
+  if (match >= 0) {
+    var llmref = APPROVED_LLMS[match];
+    var f = File(modelpath);
+    if (f.existsSync()) {
+      if (f.lengthSync() == llmref.size) {
+        print(
+            "resolve_prompt_format @ $name: MATCH TO ${llmref.name}=(${llmref.prompt_format.name})");
+        return llmref.prompt_format;
+      }
+    }
+  }
+
+  print("resolve_prompt_format @ $name: FALLBACK TO CHATML");
+  return ChatMLPromptFormat;
+}
 
 class HexColor extends Color {
   static bool isHexColor(String s) {
@@ -688,7 +718,7 @@ class RootAppParams {
 class LLMref {
   List<String> sources;
   String? fileName;
-  String? promptFormat = "chatml";
+  LLMPromptFormat prompt_format = ChatMLPromptFormat;
   String name;
   int size;
   int? native_ctxlen;
@@ -706,11 +736,15 @@ class LLMref {
       {required this.sources,
       required this.name,
       required this.size,
-      this.promptFormat,
+      LLMPromptFormat? prompt_format,
       dynamic ctxlen,
       this.meta,
       this.fileName}) {
+    if (prompt_format != null) {
+      this.prompt_format = prompt_format;
+    }
     native_ctxlen = parse_numeric_shorthand(ctxlen);
+    print("LLMREF ${this.name} ${this.prompt_format.name}");
     if (fileName == null) {
       assert(sources.isNotEmpty);
       fileName = getFileName();
@@ -720,21 +754,26 @@ class LLMref {
 
 String resolve_default_llm() {
   const defmod = String.fromEnvironment("DEFAULTMODEL", defaultValue: "");
+
   if (defmod.isNotEmpty) {
     print("Overriding default model: $defmod");
-  }
+  } else {
+    var ram_size = SysInfo.getTotalPhysicalMemory();
 
-  var ram_size = SysInfo.getTotalPhysicalMemory();
+    if (Platform.isAndroid && ram_size < (6.5 * 1024 * 1024 * 1024)) {
+      // TODO: fine-grained fallback model sequence
+      var llm =
+          APPROVED_LLMS.firstWhere((llm) => llm.name.contains("MiniChat"));
+      print(
+          "LOW RAM DEVICE: $ram_size bytes RAM AVAILABLE, OVERRIDING DEFAULT MODEL:\nTO:${llm.name}");
 
-  if (Platform.isAndroid && ram_size < (5.5 * 1024 * 1024 * 1024)) {
-    print(
-        "LOW RAM DEVICE: $ram_size bytes RAM AVAILABLE, OVERRIDING DEFAULT MODEL");
-    var llm = APPROVED_LLMS.firstWhere((llm) => llm.name.contains("TinyLLAMA"));
-    return llm.name;
+      return llm.name;
+    }
   }
 
   var llm = APPROVED_LLMS.firstWhere((llm) => llm.name == defmod,
       orElse: () => APPROVED_LLMS[0]);
+
   return llm.name;
 }
 
@@ -2658,6 +2697,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   Timer? _msg_poll_timer;
   Settings settings = Settings();
   bool _initialized = false;
+  bool _not_default_model = false;
   bool _needs_restore = true;
   Timer? _token_counter_sync;
   int _input_tokens = 0;
@@ -2744,6 +2784,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     _needs_restore = true;
     _token_counter_sync;
     _input_tokens = 0;
+    _not_default_model = false;
     _current_chat;
     _last_chat_persist;
     _current_msg_input = "";
@@ -3339,6 +3380,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     print("llm.initialize [2]: $new_modelpath");
     llm.initialize(
+        custom_format: resolve_prompt_format(new_modelpath),
         modelpath: new_modelpath,
         llama_init_json:
             resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
@@ -3494,10 +3536,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       String modelpath = default_modelpath;
       String? chat_modelpath = await attemptToRestoreChatModelPath();
 
+      _not_default_model = false;
       if (!force_default_model && chat_modelpath != null) {
         if (File(chat_modelpath).existsSync()) {
           print("RESTORING CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
           modelpath = chat_modelpath;
+          _not_default_model = true;
         } else {
           print(
               "WARNING COULD NOT ACCESS CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
@@ -3512,6 +3556,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
       print("llm.initialize [1]: $modelpath");
       llm.initialize(
+          custom_format: resolve_prompt_format(modelpath),
           modelpath: modelpath,
           llama_init_json:
               resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
@@ -3574,7 +3619,22 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     );
   }
 
-  showModelSwitchMenu() async {
+  ui_reset_model_to_default() {
+    var p = getAppInitParams();
+    if (p != null) {
+      cleanup_llm();
+      reload_model_from_file(resolve_llm_file(p, model_file: p.default_model),
+          () {
+        setState(() {
+          _not_default_model = false;
+          _initialized = true;
+        });
+        create_new_chat();
+      });
+    }
+  }
+
+  ui_show_model_switch_menu() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles();
 
     if (result != null) {
@@ -3585,6 +3645,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         lock_actions();
         cleanup_llm();
         reload_model_from_file(new_model, () {
+          _not_default_model = true;
           create_new_chat();
           unlock_actions();
         });
@@ -3715,52 +3776,82 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       )
       ..loadHtmlString(htmlCode, baseUrl: "/");
 
+    var activeColor = Theme.of(context).primaryColor;
+    Color lighterActiveColor = activeColor.lighter(50);
+    var bgColor = Theme.of(context).listTileTheme.tileColor;
+    var aiMsgColor = Theme.of(context).listTileTheme.tileColor;
+    var userMsgColor = Theme.of(context).listTileTheme.selectedTileColor;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+    var hintColor = Theme.of(context).hintColor;
     Color headerTextColor = Theme.of(context).appBarTheme.foregroundColor!;
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return Dialog(
-            child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Icon(
-                size: actionIconSize,
-                Icons.settings_applications,
-                color: headerTextColor,
-              ),
-              Expanded(
-                child: Text(
-                  'HHH Code Runner',
-                  style: TextStyle(color: headerTextColor, fontSize: 20),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            ]),
-            Container(
-                padding: const EdgeInsets.all(10),
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.6,
-                ),
-                child: Expanded(
-                  child: WebViewWidget(controller: controller!),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10.0),
+                side: BorderSide(
+                  color: activeColor, // Change this to your desired color
+                  width: 1, // Change this to your desired width
                 )),
-          ],
-        ));
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const SizedBox(width: 12.0),
+                      const Icon(
+                        size: actionIconSize - 4,
+                        Icons.settings_applications,
+                        color: Colors.grey,
+                      ),
+                      const SizedBox(width: 12.0),
+                      Expanded(
+                        child: Center(
+                            child: Text(
+                          'HHH Code Runner',
+                          style:
+                              TextStyle(color: headerTextColor, fontSize: 20),
+                        )),
+                      ),
+                      const SizedBox(width: 12.0),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.close,
+                          size: actionIconSize - 4,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ]),
+                Container(
+                    padding: const EdgeInsets.all(8),
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: aiMsgColor!.darker(50),
+                      borderRadius: const BorderRadius.only(
+                          bottomRight: Radius.circular(10.0),
+                          bottomLeft: Radius.circular(10.0)),
+                    ),
+                    child: Expanded(
+                      child: WebViewWidget(controller: controller!),
+                    )),
+              ],
+            ));
       },
     );
   }
 
-  void showCodePlayer(String htmlCode) {
+  void showCodePlayer(String htmlCode, {forceDesktopMode = false}) {
     _htmlCode = htmlCode;
 
-    if (isMobile()) {
+    if (!forceDesktopMode && isMobile()) {
       showMobileCodePlayer(htmlCode);
     } else {
       showDesktopStandaloneCodePlayer();
@@ -3774,6 +3865,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
 
     return [
+      // if (isMobile())
+      //   Row(mainAxisAlignment: MainAxisAlignment.start, children: [
+      //     CustomButton(const Text("Open Code in Browser"), iconIdle: Icons.link,
+      //         onTap: () {
+      //       print("CODE PLAY: $code");
+      //       showCodePlayer(code, forceDesktopMode: true);
+      //     })
+      //   ]),
       CustomButton(const Text("Play"), iconIdle: Icons.play_arrow, onTap: () {
         print("CODE PLAY: $code");
         showCodePlayer(code);
@@ -3833,6 +3932,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (_app_setup_done) {
       initAIifNotAlready();
       mainWidget = Expanded(
+          child: Container(
+        constraints: isMobile()
+            ? null
+            : const BoxConstraints(
+                maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
+              ),
         child: DashChat(
           inputOptions: InputOptions(
               textController: dashChatInputController,
@@ -3934,6 +4039,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       ? 1.0
                       : _prompt_processing_progress)),
           messageOptions: MessageOptions(
+              maxWidth: isMobile()
+                  ? null
+                  : max(
+                      0,
+                      min(MediaQuery.of(context).size.width,
+                              DESKTOP_MAX_CONTENT_WIDTH) -
+                          30.0),
               fullWidthRow: true, // || isMobile(),
               containerColor: aiMsgColor!,
               currentUserContainerColor: userMsgColor!,
@@ -3943,6 +4055,39 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               buildCodeBlockActions: attemptToShowCodePlayAction,
               showCurrentUserAvatar: false,
               showOtherUsersAvatar: false,
+              messageDecorationBuilder: (ChatMessage message,
+                      ChatMessage? previousMessage, ChatMessage? nextMessage) =>
+                  message.user.firstName == "User"
+                      ? BoxDecoration(
+                          color: userMsgColor,
+                          borderRadius: const BorderRadius.only(
+                              topRight: Radius.circular(3.0),
+                              bottomRight: Radius.circular(3.0),
+                              topLeft: Radius.circular(14.0),
+                              bottomLeft: Radius.circular(14.0)),
+                          border: Border(
+                            right: BorderSide(
+                              color: userMsgColor.lighter(
+                                  50), // Change this to your desired color
+                              width: 2, // Change this to your desired width
+                            ),
+                          ),
+                        )
+                      : BoxDecoration(
+                          color: aiMsgColor,
+                          borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(3.0),
+                              bottomLeft: Radius.circular(3.0),
+                              topRight: Radius.circular(14.0),
+                              bottomRight: Radius.circular(14.0)),
+                          border: Border(
+                            left: BorderSide(
+                              color: aiMsgColor.lighter(
+                                  50), // Change this to your desired color
+                              width: 2, // Change this to your desired width
+                            ),
+                          ),
+                        ),
               onLongPressMessage: (m) {
                 String msg = "${m.user.getFullName()}: ${m.text}";
                 FlutterClipboard.copy(msg);
@@ -3965,7 +4110,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           },
           messages: _messages,
         ),
-      );
+      ));
       if (!_initialized) {
         mainWidget = Stack(
           children: <Widget>[
@@ -4070,8 +4215,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                   color: iconEnabledColor,
                   onSelected: (item) {
                     switch (item) {
+                      case "model_reset":
+                        if (actionsEnabled) ui_reset_model_to_default();
+                        break;
                       case "model_switch":
-                        if (actionsEnabled) showModelSwitchMenu();
+                        if (actionsEnabled) ui_show_model_switch_menu();
                         break;
                       case "share":
                         executeChatShare();
@@ -4079,6 +4227,18 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     }
                   },
                   itemBuilder: (context) => [
+                    if (_not_default_model)
+                      const PopupMenuItem<String>(
+                          value: "model_reset",
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.restart_alt,
+                                  color: Colors.black,
+                                ),
+                                Text("  Reset model")
+                              ])),
                     const PopupMenuItem<String>(
                         value: "model_switch",
                         child: Row(
