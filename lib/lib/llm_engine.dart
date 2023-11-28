@@ -614,6 +614,11 @@ class LLMEngine {
   }
 
   bool start_advance_stream({String? user_msg, bool fix_chatml = true}) {
+    if (streaming) {
+      error = "Error: already generating completion, cancel to restart";
+      return false;
+    }
+
     streaming = true;
 
     if (user_msg != null) {

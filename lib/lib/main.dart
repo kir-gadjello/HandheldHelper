@@ -38,6 +38,7 @@ const APP_REPO_LINK = "https://github.com/kir-gadjello/handheld-helper";
 final String APP_VERSION = "βv0.1.0-${APP_COMMIT_HASH.substring(0, 8)}";
 final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
 const APPBAR_WIDTH = 220.0;
+const DESKTOP_MAX_CONTENT_WIDTH = 820.0;
 const DEFAULT_THEME_DARK = true;
 const MOBILE_DRAWER_TP = 84.0;
 const WorkspaceRoot = "HHH";
@@ -2056,7 +2057,7 @@ class _AppSetupForm extends State<AppSetupForm> {
     var setupSubHoverBgColor = Colors.lightGreen.shade200;
     var setupSubExpandedBgColor = setupSubHoverBgColor;
     var autoInstallerInfoStyle = TextStyle(color: Colors.grey.shade500);
-    var desktopSetupWidthConstrn = 820.0;
+    const desktopSetupWidthConstrn = DESKTOP_MAX_CONTENT_WIDTH;
 
     var largeBtnFontStyle =
         TextStyle(fontSize: btnFontSize, color: Colors.blue.darker(30));
@@ -2809,7 +2810,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     print("ActiveChatDialogState: attempting to persist state...");
     _cancel_timers();
     // persistState();
-    stop_llm_generation(now: true);
+    ui_stop_llm_generation(now: true);
     // if (!isMobile()) {
     //   ServicesBinding.instance.keyboard.removeHandler(_onKey);
     // }
@@ -2927,7 +2928,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (_msg_streaming && llm.streaming) {
       ret['_ai_msg_stream_acc'] = _messages[0].text;
     }
-    print("SERIALIZED_CHAT: $ret");
+    // print("SERIALIZED_CHAT: $ret");
     return ret;
   }
 
@@ -3463,14 +3464,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       {bool force_default_model = false,
       bool attempt_restore_chat = true,
       void Function(bool)? onInitDone}) async {
-    if (!force_default_model && _initial_modelload_done) {
+    if (_msg_streaming || (!force_default_model && _initial_modelload_done)) {
       return;
     }
     if (llm.init_in_progress ||
         llm.state == LLMEngineState.INITIALIZED_SUCCESS ||
         llm.state == LLMEngineState.INITIALIZED_FAILURE) {
       print("initAIifNotAlready: llm.init_in_progress");
-      if (llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
+      if (!_initialized && llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
         print("LLM already initialized, unlocking actions");
         unlock_actions();
         if (attempt_restore_chat) {
@@ -3634,7 +3635,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  stop_llm_generation({now = false}) async {
+  ui_stop_llm_generation({now = false}) async {
     if (_msg_streaming) {
       await clearPersistedState(onlyStreaming: true);
       _msg_poll_timer?.cancel();
@@ -3907,7 +3908,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               ),
               inputToolbarStyle:
                   BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
-              inputDisabled: !(_msg_streaming || (_initialized ?? false)),
+              inputDisabled: _msg_streaming || !(_initialized ?? false),
               onTextChange: (String upd) {
                 dlog("LOG onTextChange $upd");
                 _current_msg_input = upd;
@@ -4041,7 +4042,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       Icons.stop,
                       color: iconEnabledColor,
                     ),
-                    onPressed: stop_llm_generation,
+                    onPressed: ui_stop_llm_generation,
                   ),
                 IconButton(
                   padding: actionIconPadding,
@@ -4795,7 +4796,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   maxHeight: MediaQuery.of(context).size.height,
                   maxWidth: isMobile()
                       ? MediaQuery.of(context).size.width * 0.95
-                      : 820.0,
+                      : DESKTOP_MAX_CONTENT_WIDTH,
                 ),
                 child: SingleChildScrollView(
                     child: FastForm(
