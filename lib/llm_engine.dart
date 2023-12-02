@@ -88,10 +88,11 @@ String format_minichat(List<AIChatMessage> messages,
   print("DUMP $messages");
 
   for (final msg in messages) {
-    if (msg.role == "SYSTEM") {
+    var role = msg.role.toLowerCase();
+    if (role == "system") {
       ret += "${msg.content}</s>";
     } else {
-      ret += "${role_map[msg.role] ?? msg.role} ${msg.content}</s>";
+      ret += "${role_map[role] ?? msg.role} ${msg.content}</s>";
     }
   }
   if (add_assistant_preprompt) {

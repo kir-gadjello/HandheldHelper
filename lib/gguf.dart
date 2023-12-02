@@ -132,13 +132,15 @@ Future<Map<String, dynamic>?> parseGGUF(String path,
   final magicNumber =
       magicNumberBuffer.buffer.asByteData().getUint32(0, Endian.big);
   if (magicNumber != 0x47475546) {
+    print("Could not parse magic number: $magicNumber");
     raf.close();
     return null;
   }
 
   final versionBuffer = await raf.read(4);
   final version = versionBuffer.buffer.asByteData().getUint32(0, Endian.little);
-  if (version != 3) {
+  if (version < 2) {
+    print("Incorrect version: $version");
     raf.close();
     return null;
   }
@@ -165,6 +167,182 @@ Future<Map<String, dynamic>?> parseGGUF(String path,
         valueTypeBuffer.buffer.asByteData().getUint32(0, Endian.little);
 
     metadata[key] = await parseValue(raf, valueType);
+
+    if (_keys != null) {
+      _keys.remove(key);
+      if (_keys.isEmpty) {
+        raf.close();
+        return metadata;
+      }
+    }
+  }
+
+  raf.close();
+  return metadata;
+}
+
+dynamic parseArraySync(RandomAccessFile raf) {
+  final arrTypeBuffer = raf.readSync(4);
+  final arrType = arrTypeBuffer.buffer.asByteData().getUint32(0, Endian.little);
+
+  final numEltsBuffer = raf.readSync(8);
+  final numElts = numEltsBuffer.buffer.asByteData().getUint64(0, Endian.little);
+
+  final ret = <dynamic>[];
+  for (var i = 0; i < numElts; i++) {
+    switch (arrType) {
+      case 0: // uint8
+        final valueBuffer = raf.readSync(1);
+        ret.add(valueBuffer.buffer.asByteData().getUint8(0));
+        break;
+      case 1: // int8
+        final valueBuffer = raf.readSync(1);
+        ret.add(valueBuffer.buffer.asByteData().getInt8(0));
+        break;
+      case 2: // uint16
+        final valueBuffer = raf.readSync(2);
+        ret.add(valueBuffer.buffer.asByteData().getUint16(0, Endian.little));
+        break;
+      case 3: // int16
+        final valueBuffer = raf.readSync(2);
+        ret.add(valueBuffer.buffer.asByteData().getInt16(0, Endian.little));
+        break;
+      case 4: // uint32
+        final valueBuffer = raf.readSync(4);
+        ret.add(valueBuffer.buffer.asByteData().getUint32(0, Endian.little));
+        break;
+      case 5: // int32
+        final valueBuffer = raf.readSync(4);
+        ret.add(valueBuffer.buffer.asByteData().getInt32(0, Endian.little));
+        break;
+      case 6: // float32
+        final valueBuffer = raf.readSync(4);
+        ret.add(valueBuffer.buffer.asByteData().getFloat32(0, Endian.little));
+        break;
+      case 7: // bool
+        final valueBuffer = raf.readSync(1);
+        ret.add(valueBuffer.buffer.asByteData().getUint8(0) != 0);
+        break;
+      case 8: // string
+        final stringLengthBuffer = raf.readSync(8);
+        final stringLength =
+            stringLengthBuffer.buffer.asByteData().getUint64(0, Endian.little);
+        final stringBuffer = raf.readSync(stringLength.toInt());
+        ret.add(utf8.decode(stringBuffer.buffer.asUint8List()));
+        break;
+      case 9: // array
+        return parseArray(raf);
+      case 10: // uint64
+        final valueBuffer = raf.readSync(8);
+        ret.add(valueBuffer.buffer.asByteData().getUint64(0, Endian.little));
+        break;
+      case 11: // int64
+        final valueBuffer = raf.readSync(8);
+        ret.add(valueBuffer.buffer.asByteData().getInt64(0, Endian.little));
+        break;
+      case 12: // float64
+        final valueBuffer = raf.readSync(8);
+        ret.add(valueBuffer.buffer.asByteData().getFloat64(0, Endian.little));
+        break;
+      default:
+        throw Exception('Unknown value type: $arrType');
+    }
+  }
+  return ret;
+}
+
+dynamic parseValueSync(RandomAccessFile raf, int valueType) {
+  switch (valueType) {
+    case 0: // uint8
+      final valueBuffer = raf.readSync(1);
+      return valueBuffer.buffer.asByteData().getUint8(0);
+    case 1: // int8
+      final valueBuffer = raf.readSync(1);
+      return valueBuffer.buffer.asByteData().getInt8(0);
+    case 2: // uint16
+      final valueBuffer = raf.readSync(2);
+      return valueBuffer.buffer.asByteData().getUint16(0, Endian.little);
+    case 3: // int16
+      final valueBuffer = raf.readSync(2);
+      return valueBuffer.buffer.asByteData().getInt16(0, Endian.little);
+    case 4: // uint32
+      final valueBuffer = raf.readSync(4);
+      return valueBuffer.buffer.asByteData().getUint32(0, Endian.little);
+    case 5: // int32
+      final valueBuffer = raf.readSync(4);
+      return valueBuffer.buffer.asByteData().getInt32(0, Endian.little);
+    case 6: // float32
+      final valueBuffer = raf.readSync(4);
+      return valueBuffer.buffer.asByteData().getFloat32(0, Endian.little);
+    case 7: // bool
+      final valueBuffer = raf.readSync(1);
+      return valueBuffer.buffer.asByteData().getUint8(0) != 0;
+    case 8: // string
+      final stringLengthBuffer = raf.readSync(8);
+      final stringLength =
+          stringLengthBuffer.buffer.asByteData().getUint64(0, Endian.little);
+
+      final stringBuffer = raf.readSync(stringLength.toInt());
+      return utf8.decode(stringBuffer.buffer.asUint8List());
+    case 9: // array
+      return parseArraySync(raf);
+    case 10: // uint64
+      final valueBuffer = raf.readSync(8);
+      return valueBuffer.buffer.asByteData().getUint64(0, Endian.little);
+    case 11: // int64
+      final valueBuffer = raf.readSync(8);
+      return valueBuffer.buffer.asByteData().getInt64(0, Endian.little);
+    case 12: // float64
+      final valueBuffer = raf.readSync(8);
+      return valueBuffer.buffer.asByteData().getFloat64(0, Endian.little);
+    default:
+      throw Exception('Unknown value type: $valueType');
+  }
+}
+
+Map<String, dynamic>? parseGGUFsync(String path, {Set<String>? findKeys}) {
+  final _keys = findKeys != null ? Set.from(findKeys) : null;
+  final file = File(path);
+
+  RandomAccessFile raf = file.openSync();
+
+  final magicNumberBuffer = raf.readSync(4);
+  final magicNumber =
+      magicNumberBuffer.buffer.asByteData().getUint32(0, Endian.big);
+  if (magicNumber != 0x47475546) {
+    raf.close();
+    return null;
+  }
+
+  final versionBuffer = raf.readSync(4);
+  final version = versionBuffer.buffer.asByteData().getUint32(0, Endian.little);
+  if (version < 2) {
+    raf.close();
+    return null;
+  }
+
+  final tensorCountBuffer = raf.readSync(8);
+  final tensorCount =
+      tensorCountBuffer.buffer.asByteData().getUint64(0, Endian.little);
+
+  final metadataKvCountBuffer = raf.readSync(8);
+  final metadataKvCount =
+      metadataKvCountBuffer.buffer.asByteData().getUint64(0, Endian.little);
+
+  final metadata = <String, dynamic>{};
+  for (var i = 0; i < metadataKvCount; i++) {
+    final keyLengthBuffer = raf.readSync(8);
+    final keyLength =
+        keyLengthBuffer.buffer.asByteData().getUint64(0, Endian.little);
+
+    final keyBuffer = raf.readSync(keyLength.toInt());
+    final key = utf8.decode(keyBuffer.buffer.asUint8List());
+
+    final valueTypeBuffer = raf.readSync(4);
+    final valueType =
+        valueTypeBuffer.buffer.asByteData().getUint32(0, Endian.little);
+
+    metadata[key] = parseValueSync(raf, valueType);
 
     if (_keys != null) {
       _keys.remove(key);

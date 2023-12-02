@@ -189,7 +189,7 @@ Widget MdViewer(
         copyIconColor: styleSheet.copyIconColor,
       ),
     ],
-    selectable: true,
+    selectable: false,
     selectionColor: activeColor,
     styleSheet: styleSheet,
   );

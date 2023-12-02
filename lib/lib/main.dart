@@ -53,6 +53,7 @@ final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 final APPROVED_LLMS = [
   LLMref(
       name: 'OpenHermes-2.5-Mistral-7B',
+      gguf_name: "teknium_openhermes-2.5-mistral-7b",
       size: 4368450304,
       ctxlen: "8k",
       sources: [
@@ -60,6 +61,7 @@ final APPROVED_LLMS = [
       ]),
   LLMref(
       name: 'OpenHermes-2-Mistral-7B',
+      gguf_name: "teknium_openhermes-2-mistral-7b",
       size: 4368450272,
       ctxlen: "8k",
       sources: [
@@ -67,6 +69,7 @@ final APPROVED_LLMS = [
       ]),
   LLMref(
       name: "TinyLLAMA-1t-OpenOrca",
+      gguf_name: "jeff31415_tinyllama-1.1b-1t-openorca",
       size: 667814368,
       ctxlen: "2k",
       sources: [
@@ -74,6 +77,7 @@ final APPROVED_LLMS = [
       ]),
   LLMref(
       name: "MiniChat-1.5-3B",
+      gguf_name: "LLaMA v2",
       size: 1846655072,
       ctxlen: "2k",
       prompt_format: MiniChatPromptFormat,
@@ -98,11 +102,13 @@ final APPROVED_LLMS = [
    */
 ];
 
+Map<String, Map<String, String>> known_prompt_formats = {};
+
 LLMPromptFormat resolve_prompt_format(String modelpath) {
   var name = Path.basename(modelpath);
 
-  var match =
-      APPROVED_LLMS.indexWhere((element) => element.getFileName() == name);
+  var match = APPROVED_LLMS
+      .indexWhere((element) => element.matchAgainstPath(modelpath));
 
   if (match >= 0) {
     var llmref = APPROVED_LLMS[match];
@@ -720,6 +726,7 @@ class LLMref {
   String? fileName;
   LLMPromptFormat prompt_format = ChatMLPromptFormat;
   String name;
+  String gguf_name;
   int size;
   int? native_ctxlen;
   Map<String, dynamic>? meta;
@@ -732,10 +739,23 @@ class LLMref {
         .firstWhere((element) => element.startsWith(RegExp(r"https?://"))));
   }
 
+  bool matchAgainstPath(String p) {
+    var f = File(p);
+    // TODO: some general.name are uninformative and we'd rather use filename
+    if (f.existsSync() && f.lengthSync() == size) {
+      var meta = parseGGUFsync(p, findKeys: {"general.name"});
+      if (meta != null && meta.containsKey("general.name")) {
+        return meta["general.name"] == gguf_name;
+      }
+    }
+    return false;
+  }
+
   LLMref(
       {required this.sources,
       required this.name,
       required this.size,
+      required this.gguf_name,
       LLMPromptFormat? prompt_format,
       dynamic ctxlen,
       this.meta,
@@ -762,8 +782,8 @@ String resolve_default_llm() {
 
     if (Platform.isAndroid && ram_size < (6.5 * 1024 * 1024 * 1024)) {
       // TODO: fine-grained fallback model sequence
-      var llm =
-          APPROVED_LLMS.firstWhere((llm) => llm.name.contains("MiniChat"));
+      var llm = APPROVED_LLMS
+          .firstWhere((llm) => llm.name.toLowerCase().contains("tinyllama"));
       print(
           "LOW RAM DEVICE: $ram_size bytes RAM AVAILABLE, OVERRIDING DEFAULT MODEL:\nTO:${llm.name}");
 
@@ -1165,16 +1185,19 @@ class CollapsibleWidget extends StatefulWidget {
   final Widget collapsedChild;
   final Widget expandedChild;
   final bool blockParentCollapse;
+  final bool disabled;
   final bool crossCircle; // New user argument
   final double crossCircleDiameter = 32;
   Function()? onExpand;
-  Function()? onCollapse;
+  Future<bool?> Function()? onCollapse;
+  Function(CollapsibleWidget)? onCloseHandler;
 
   CollapsibleWidget(
       {required this.collapsedChild,
       required this.expandedChild,
       this.onExpand,
       this.onCollapse,
+      this.disabled = false,
       this.blockParentCollapse = false,
       this.crossCircle = false}); // User argument is now required
 
@@ -1197,6 +1220,9 @@ class _CollapsibleWidgetState extends State<CollapsibleWidget> {
       children: <Widget>[
         GestureDetector(
           onTap: () {
+            if (widget.disabled) {
+              return;
+            }
             if (widget.blockParentCollapse && isExpanded) {
               return;
             }
@@ -1206,9 +1232,12 @@ class _CollapsibleWidgetState extends State<CollapsibleWidget> {
             if (!isExpanded && widget.onExpand != null) {
               widget.onExpand!();
             }
-            if (isExpanded && widget.onCollapse != null) {
-              widget.onCollapse!();
-            }
+            // if (isExpanded && widget.onCollapse != null) {
+            //   var maybeCancel = await widget.onCollapse!();
+            //   if (maybeCancel != null) {
+            //     return;
+            //   }
+            // }
             setState(() {
               isExpanded = !isExpanded;
             });
@@ -1229,12 +1258,15 @@ class _CollapsibleWidgetState extends State<CollapsibleWidget> {
                 color: Colors.red, // Set the color of the circle
               ),
               child: GestureDetector(
-                onTap: () {
+                onTap: () async {
+                  if (isExpanded && widget.onCollapse != null) {
+                    var maybeCancel = await widget.onCollapse!();
+                    if (maybeCancel == true) {
+                      return;
+                    }
+                  }
                   setState(() {
                     isExpanded = false;
-                    if (widget.onCollapse != null) {
-                      widget.onCollapse!();
-                    }
                   });
                 },
                 child: const MouseRegion(
@@ -1761,6 +1793,48 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
   }
 }
 
+void showCancelInstallationDialog(
+  BuildContext context, {
+  String title = 'Cancel the installation?',
+  String yesButtonText = 'Yes',
+  String noButtonText = 'No',
+  required Function() onYesButtonPressed,
+  required Function() onNoButtonPressed,
+}) {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.orangeAccent,
+            fontSize: 24.0,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: <Widget>[
+          TextButton(
+            child: Text(yesButtonText),
+            onPressed: () {
+              onYesButtonPressed();
+              Navigator.of(context).pop();
+            },
+          ),
+          TextButton(
+            child: Text(noButtonText),
+            onPressed: () {
+              onNoButtonPressed();
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class CheckmarkedTextRow extends StatelessWidget {
   final bool success;
   final bool failure;
@@ -1890,6 +1964,7 @@ class _AppSetupForm extends State<AppSetupForm> {
   bool _downloadFailed = false;
   bool _downloadCheckedOK = false;
   bool _downloadCheckFailed = false;
+  bool _one_click_installer_open = false;
   List<String> _advanced_form_errors = [];
 
   bool _couldNotCreateDirectory = false;
@@ -1910,12 +1985,13 @@ class _AppSetupForm extends State<AppSetupForm> {
   }
 
   _resetOneClickState() {
-    bool _downloadCanStart = false;
-    bool _downloadNecessary = true;
-    bool _downloadSucceeded = false;
-    bool _downloadFailed = false;
-    bool _downloadCheckedOK = false;
-    bool _downloadCheckFailed = false;
+    _downloadCanStart = false;
+    _downloadNecessary = true;
+    _downloadSucceeded = false;
+    _downloadFailed = false;
+    _downloadCheckedOK = false;
+    _downloadCheckFailed = false;
+    _one_click_installer_open = false;
   }
 
   _oneClickInstallInit() async {
@@ -1930,8 +2006,9 @@ class _AppSetupForm extends State<AppSetupForm> {
     }
 
     // TODO: attempt to copy/move the LLM checkpoint from user's Downloads
-    var llm_file_ok = await _checkLLMfile();
+    var llm_file_ok = await _checkLLMfile(soft: true);
     setState(() {
+      _one_click_installer_open = true;
       _downloadCanStart = exists;
       _downloadNecessary = !llm_file_ok;
       if (!exists) {
@@ -1944,7 +2021,7 @@ class _AppSetupForm extends State<AppSetupForm> {
   }
 
   Future<bool> _checkLLMfile(
-      {try_downloads_dir = false, move_from_dir = false}) async {
+      {try_downloads_dir = false, move_from_dir = false, soft = false}) async {
     final hhh_dir = widget.resolved_defaults.hhh_dir;
 
     final llm_url = widget.resolved_defaults.llm_url;
@@ -1959,6 +2036,8 @@ class _AppSetupForm extends State<AppSetupForm> {
       print("Attempting to find LLM file at user Downloads directory");
     }
 
+    var warn = soft ? "CHECK" : "ERROR";
+
     var llm_file_exists = await File(hhh_llm_dl_path).exists();
     var llm_file_can_be_opened = false;
     try {
@@ -1966,10 +2045,10 @@ class _AppSetupForm extends State<AppSetupForm> {
       print("FREAD: $hhh_llm_dl_path => ${f.read(4).toString()}");
       llm_file_can_be_opened = true;
     } catch (e) {
-      print("ERROR: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path, $e");
+      print("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path, $e");
     }
     if (!llm_file_can_be_opened) {
-      print("ERROR: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path");
+      print("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path");
       // TODO: Backtrack to a safer llm file location
     }
 
@@ -2187,9 +2266,16 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                         print("START HTTP DOWNLOAD SEQUENCE");
                         _oneClickInstallInit();
                       },
-                      onCollapse: () {
+                      onCollapse: () async {
                         print("CLOSE HTTP DOWNLOAD SEQUENCE");
-                        _resetOneClickState();
+                        var completer = Completer<bool?>();
+                        showCancelInstallationDialog(context,
+                            onYesButtonPressed: () {
+                              completer.complete(null);
+                              _resetOneClickState();
+                            },
+                            onNoButtonPressed: () => completer.complete(true));
+                        return completer.future;
                       },
                       collapsedChild: HoverableText(
                           borderRadius: setupSubBorderRadius,
@@ -2252,6 +2338,8 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                           // 'https://example.com/index.html'
                                           destinationPath: hhh_llm_dl_path,
                                           onDownloadEnd: (success, b, c) {
+                                            print(
+                                                "DOWNLOAD COMPLETE: $success $b $c");
                                             if (success) {
                                               _downloadSucceeded = true;
                                               print("CHECKING LLM FILE...");
@@ -2273,10 +2361,13 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                             ])),
                       )),
                   CollapsibleWidget(
+                      disabled: _one_click_installer_open,
                       crossCircle: true,
                       collapsedChild: HoverableText(
                           borderRadius: setupSubBorderRadius,
-                          bgColor: setupSubBgColor,
+                          bgColor: _one_click_installer_open
+                              ? Colors.grey
+                              : setupSubBgColor,
                           hoverBgColor: setupSubHoverBgColor,
                           child: Padding(
                             padding: interButtonPadding,
@@ -2286,7 +2377,9 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                       'Show advanced model & storage settings',
                                       style: TextStyle(
                                           fontSize: btnFontSize,
-                                          color: largeBtnFontStyle.color))),
+                                          color: _one_click_installer_open
+                                              ? Colors.grey.shade700
+                                              : largeBtnFontStyle.color))),
                               const Icon(Icons.app_settings_alt,
                                   size: 32, color: Colors.grey),
                             ]),
@@ -3437,13 +3530,23 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
+  bool _force_setup_done = false;
+
   bool app_setup_done() {
+    if (const String.fromEnvironment("FORCE_SETUP", defaultValue: "")
+            .isNotEmpty &&
+        !_force_setup_done) {
+      widget.appInitParams.params = null;
+      _force_setup_done = true;
+      return false;
+    }
+
     var ret = getAppInitParams() != null;
     if (Platform.isAndroid) {
       var sp = widget.appInitParams.storagePermissionGranted;
       if (!sp) {
         print("SETUP INCOMPLETE: STORAGE PERMISSION NOT GRANTED");
-        return false;
+        // TODO: return false;
       }
     }
     return ret;
@@ -3736,8 +3839,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       if (request.method == "GET" &&
           request.uri.path == "/code.html" &&
           _htmlCode != null) {
+        print("HTTP RESP: $_htmlCode}");
         request.response
           ..headers.contentType = ContentType.html
+          ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
           ..write(_htmlCode)
           ..close();
       } else {
@@ -3829,19 +3934,19 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       ),
                     ]),
                 Container(
-                    padding: const EdgeInsets.all(8),
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: aiMsgColor!.darker(50),
-                      borderRadius: const BorderRadius.only(
-                          bottomRight: Radius.circular(10.0),
-                          bottomLeft: Radius.circular(10.0)),
-                    ),
-                    child: Expanded(
-                      child: WebViewWidget(controller: controller!),
-                    )),
+                  padding: const EdgeInsets.all(8),
+                  clipBehavior: Clip.hardEdge,
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: aiMsgColor!.darker(50),
+                    borderRadius: const BorderRadius.only(
+                        bottomRight: Radius.circular(10.0),
+                        bottomLeft: Radius.circular(10.0)),
+                  ),
+                  child: WebViewWidget(controller: controller!),
+                ),
               ],
             ));
       },
@@ -3856,6 +3961,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     } else {
       showDesktopStandaloneCodePlayer();
     }
+
     setState(() {});
   }
 
@@ -3899,14 +4005,21 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     Widget mainWidget;
 
+    var isDarkMode =
+        MediaQuery.of(context).platformBrightness == Brightness.dark;
     var activeColor = Theme.of(context).primaryColor;
     Color lighterActiveColor = activeColor.lighter(50);
     var bgColor = Theme.of(context).listTileTheme.tileColor;
-    var aiMsgColor = Theme.of(context).listTileTheme.tileColor;
-    var userMsgColor = Theme.of(context).listTileTheme.selectedTileColor;
+    var aiMsgColor = Theme.of(context).listTileTheme.tileColor!;
+    var userMsgColor = Theme.of(context).listTileTheme.selectedTileColor!;
     var textColor = Theme.of(context).listTileTheme.textColor;
     var hintColor = Theme.of(context).hintColor;
     Color headerTextColor = Theme.of(context).appBarTheme.foregroundColor!;
+
+    var userMsgBorderColor =
+        isDarkMode ? userMsgColor.lighter(50) : userMsgColor.darker(50);
+    var aiMsgBorderColor =
+        isDarkMode ? aiMsgColor.lighter(50) : aiMsgColor.darker(50);
 
     var now = DateTime.now();
 
@@ -4067,8 +4180,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                               bottomLeft: Radius.circular(14.0)),
                           border: Border(
                             right: BorderSide(
-                              color: userMsgColor.lighter(
-                                  50), // Change this to your desired color
+                              color:
+                                  userMsgBorderColor, // Change this to your desired color
                               width: 2, // Change this to your desired width
                             ),
                           ),
@@ -4082,14 +4195,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                               bottomRight: Radius.circular(14.0)),
                           border: Border(
                             left: BorderSide(
-                              color: aiMsgColor.lighter(
-                                  50), // Change this to your desired color
+                              color:
+                                  aiMsgBorderColor, // Change this to your desired color
                               width: 2, // Change this to your desired width
                             ),
                           ),
                         ),
               onLongPressMessage: (m) {
-                String msg = "${m.user.getFullName()}: ${m.text}";
+                String msg = m.text;
                 FlutterClipboard.copy(msg);
                 showSnackBarTop(context,
                     "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
@@ -4818,7 +4931,8 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   @override
   void initState() {
     super.initState();
-    _chats = _chatManager.getMessagesFromChats([], sort_chats: true, limit: 3);
+    _chats = _chatManager.getMessagesFromChats([],
+        sort_chats: true, sort_reversed: true, limit: 3);
   }
 
   @override
@@ -5504,6 +5618,24 @@ void main(List<String> args) async {
     dlog = print;
   }
   dlog("CMD ARGS: ${args.join(',')}");
+
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    var data = jsonDecode(
+            await rootBundle.loadString("assets/known_prompt_formats.json"))
+        as Map<String, dynamic>;
+
+    data.forEach((key, value) {
+      Map<String, String> submap = {};
+      value.forEach((key, value) {
+        submap[key] = value.toString();
+      });
+      known_prompt_formats[key] = submap;
+    });
+  } catch (e) {
+    print("Could not load default prompt formats: $e");
+  }
 
   runApp(const ProviderScope(child: HandheldHelper()));
 }
