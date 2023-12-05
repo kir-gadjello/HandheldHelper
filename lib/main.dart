@@ -29,13 +29,16 @@ import 'package:filesystem_picker/filesystem_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
 const APP_TITLE_SHORT = "HHH";
 const APP_TITLE_FULL = "HandHeld Helper Beta";
 const APP_REPO_LINK = "https://github.com/kir-gadjello/handheld-helper";
-final String APP_VERSION = "βv0.1.0-${APP_COMMIT_HASH.substring(0, 8)}";
+final String APP_VERSION = "0.1.0";
+final String APP_VERSION_FULL =
+    "βv$APP_VERSION-${APP_COMMIT_HASH.substring(0, 8)}";
 final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
 const APPBAR_WIDTH = 220.0;
 const DESKTOP_MAX_CONTENT_WIDTH = 820.0;
@@ -2973,14 +2976,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  void lock_actions() {
+  void lock_interaction() {
     setState(() {
       print("ACTIONS LOCKED");
       _initialized = false;
     });
   }
 
-  void unlock_actions() {
+  void unlock_interaction() {
     setState(() {
       print("ACTIONS UNLOCKED");
       _initialized = true;
@@ -3195,11 +3198,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
 
             if (llm.streaming) {
-              lock_actions();
+              lock_interaction();
               llm.clear_state(onComplete: () async {
                 await addMessageToActiveChat("ai", partial_answer,
                     meta: {"_interrupted": true});
-                unlock_actions();
+                unlock_interaction();
               });
             } else {
               await addMessageToActiveChat("ai", partial_answer,
@@ -3485,7 +3488,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         onInitDone: (success) async {
           if (success) {
             // await create_new_chat();
-            unlock_actions();
+            unlock_interaction();
             if (onInitDone != null) {
               onInitDone();
             }
@@ -3618,7 +3621,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       print("initAIifNotAlready: llm.init_in_progress");
       if (!_initialized && llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
         print("LLM already initialized, unlocking actions");
-        unlock_actions();
+        unlock_interaction();
         if (attempt_restore_chat) {
           attemptToRestartChat();
         }
@@ -3680,7 +3683,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                   attemptToRestartChat();
                 }
               }
-              unlock_actions();
+              unlock_interaction();
             } else {
               // TODO: handle failure better
               _initial_modelload_done = false;
@@ -3699,7 +3702,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       print("initAIifNotAlready: llm.initialized && !_initialized");
       // reentry
       attemptToRestartChat();
-      unlock_actions();
+      unlock_interaction();
     }
   }
 
@@ -3745,12 +3748,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       if (file.existsSync()) {
         var new_model = file.path;
         dlog("RELOADING FROM $new_model");
-        lock_actions();
+        lock_interaction();
         cleanup_llm();
         reload_model_from_file(new_model, () {
           _not_default_model = true;
           create_new_chat();
-          unlock_actions();
+          unlock_interaction();
         });
       }
     } else {
@@ -4405,32 +4408,6 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 }
 
-String limitText(String text, int max_out_len,
-    {bool ellipsis = true, int? max_n_lines}) {
-  int start = 0;
-  int end = max_out_len;
-
-  if (end > text.length) {
-    end = text.length;
-  }
-
-  String limitedText = text.substring(start, end);
-
-  if (max_n_lines != null) {
-    var lines = limitedText.split('\n');
-    int linesCount = lines.length;
-    if (linesCount > max_n_lines) {
-      limitedText = lines.sublist(0, max_n_lines).join('\n');
-    }
-  }
-
-  if (ellipsis && end < text.length) {
-    limitedText += '...';
-  }
-
-  return limitedText;
-}
-
 RichText highlightSearchResult(
     String text, String query, int max_out_len, Color highlight_color,
     {bool matchCase = false, ellipsis = true, int? max_n_lines}) {
@@ -4980,14 +4957,20 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   }
 }
 
-class SettingsNotifier extends StateNotifier<Map<String, dynamic>> {
+class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   final MetadataManager _metadataManager = MetadataManager();
 
-  SettingsNotifier() : super({});
+  @override
+  FutureOr<Map<String, dynamic>> build() async {
+    restore();
+    return {};
+  }
 
-  Future<void> updateSettings(Map<String, dynamic> newSettings) async {
+  Future<void> updateSettings(Map<String, dynamic> newSettings,
+      {patch = false}) async {
+    if (patch) {}
     await persist(newSettings);
-    state = newSettings;
+    state = AsyncValue.data(newSettings);
   }
 
   Future<void> persist(Map<String, dynamic> settings) async {
@@ -4996,34 +4979,26 @@ class SettingsNotifier extends StateNotifier<Map<String, dynamic>> {
 
   Future<void> restore() async {
     // Your async restore logic here
+    state = const AsyncValue.loading();
     final restoredSettings = await restoreSettings();
-    state = restoredSettings;
+    state = AsyncValue.data(restoredSettings);
   }
 
   Future<Map<String, dynamic>> restoreSettings() async {
     // Your logic to restore settings here
-    return _metadataManager.getMetadata("_app_settings", defaultValue: {})
-        as Map<String, dynamic>;
+    var ret =
+        await _metadataManager.getMetadata("_app_settings", defaultValue: {});
+    if (ret is Map) {
+      print("RESTORE SETTINGS: $ret");
+      return Map<String, dynamic>.from(ret);
+    }
+    return {};
   }
 }
 
 final settingsProvider =
-    StateNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
-        (ref) => SettingsNotifier());
-
-final persistSettingsProvider = FutureProvider.autoDispose
-    .family<void, Map<String, dynamic>>((ref, newSettings) async {
-  final settingsNotifier = ref.watch(settingsProvider.notifier);
-  await settingsNotifier.persist(newSettings);
-  settingsNotifier.state = newSettings;
-});
-
-final restoreSettingsProvider =
-    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final settingsNotifier = ref.watch(settingsProvider.notifier);
-  await settingsNotifier.restore();
-  return settingsNotifier.state;
-});
+    AsyncNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
+        () => SettingsNotifier());
 
 class SettingsPage extends ConsumerStatefulWidget {
   @override
@@ -5031,19 +5006,10 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  final MetadataManager _metadataManager = MetadataManager();
-  final TextEditingController _userMessageColorController =
-      TextEditingController();
-  final TextEditingController _aiMessageColorController =
-      TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormBuilderState>();
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(settingsProvider);
-    final persistSettings = ref.watch(persistSettingsProvider(settings));
-    final restoreSettings = ref.watch(restoreSettingsProvider);
-
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
 
@@ -5057,82 +5023,71 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     var textColor = Theme.of(context).listTileTheme.textColor;
     var hintColor = Theme.of(context).hintColor;
 
-    return Scaffold(
-        drawer: _buildDrawer(context),
-        appBar: AppBar(backgroundColor: bgColor, title: const Text("Settings")),
-        body: Center(
-            child: Container(
-                padding: const EdgeInsets.all(20.0),
-                decoration: BoxDecoration(
-                    color: formBgColor,
-                    borderRadius: BorderRadius.circular(8.0)),
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height,
-                  maxWidth: isMobile()
-                      ? MediaQuery.of(context).size.width * 0.95
-                      : DESKTOP_MAX_CONTENT_WIDTH,
-                ),
-                child: SingleChildScrollView(
-                    child: FastForm(
-                  onChanged: (data) {
-                    // persistSettings.
-                  },
-                  adaptive: false,
-                  formKey: _formKey,
-                  children: [
-                    Column(
-                      children: [
-                        FastFormSection(children: [
-                          FastDropdown<String>(
-                            dropdownColor: formBgColor,
-                            name: 'default_model',
-                            labelText: 'Default Model',
-                            items: ['Model 1', 'Model 2', 'Model 3'],
-                            initialValue: 'Model 1',
-                            onChanged: (value) {
-                              _metadataManager.setMetadata(
-                                  'default_model', value);
-                            },
-                            style: TextStyle(color: fgColor),
+    final settings = ref.watch(settingsProvider);
+
+    return settings.when(
+      data: (settings) {
+        return Scaffold(
+            drawer: _buildDrawer(context),
+            appBar:
+                AppBar(backgroundColor: bgColor, title: const Text("Settings")),
+            body: Center(
+                child: Container(
+                    padding: const EdgeInsets.all(20.0),
+                    decoration: BoxDecoration(
+                        color: formBgColor,
+                        borderRadius: BorderRadius.circular(8.0)),
+                    constraints: BoxConstraints(
+                      maxHeight: screenHeight,
+                      maxWidth: isMobile()
+                          ? screenWidth * 0.95
+                          : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
+                    ),
+                    child: SingleChildScrollView(
+                        child: FormBuilder(
+                      key: _formKey,
+                      initialValue: settings,
+                      onChanged: () {
+                        _formKey.currentState?.saveAndValidate();
+                        var data = _formKey.currentState?.value ?? {};
+                        final settingsNotifier =
+                            ref.read(settingsProvider.notifier);
+                        print("SAVE SETTINGS: $data");
+                        settingsNotifier.updateSettings(data);
+                      },
+                      child: Column(
+                        children: <Widget>[
+                          FormBuilderDropdown<String>(
+                              name: 'default_system_prompt',
+                              items: [DropdownMenuItem(child: Text('Basic'))]),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FormBuilderDropdown<String>(
+                                    name: 'default_system_prompt',
+                                    items: [
+                                      DropdownMenuItem(child: Text('Basic'))
+                                    ]),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.add_box_outlined),
+                                onPressed: () {
+                                  print("ADD NEW PROMPT");
+                                },
+                                color: Colors.black,
+                              )
+                            ],
                           ),
-                          FastDropdown<String>(
-                            dropdownColor: formBgColor,
-                            name: 'default_system_prompt',
-                            labelText: 'Default system prompt',
-                            items: ['Prompt 1', 'Prompt 2', 'Prompt 3'],
-                            initialValue: 'Prompt 1',
-                            onChanged: (value) {
-                              _metadataManager.setMetadata(
-                                  'default_system_prompt', value);
-                            },
-                            style: TextStyle(color: fgColor),
-                          ),
-                          FastTextField(
-                            name: 'max_context_size',
-                            labelText: 'Max context size',
-                            style: TextStyle(color: fgColor),
-                            placeholderStyle:
-                                TextStyle(color: fgColor.darker(30)),
-                          ),
-                          FastTextField(
-                            name: 'userMessageColor',
-                            labelText: 'User Message Color',
-                            style: TextStyle(color: fgColor),
-                            placeholderStyle:
-                                TextStyle(color: fgColor.darker(30)),
-                          ),
-                          FastTextField(
-                            name: 'aiMessageColor',
-                            labelText: 'AI Message Color',
-                            style: TextStyle(color: fgColor),
-                            placeholderStyle:
-                                TextStyle(color: fgColor.darker(30)),
-                          ),
-                        ])
-                      ],
-                    )
-                  ],
-                )))));
+                          FormBuilderTextField(name: 'field1'),
+                          FormBuilderTextField(name: 'field2'),
+                          // Add more FormBuilderTextField widgets as needed
+                        ],
+                      ),
+                    )))));
+      },
+      loading: () => CircularProgressIndicator(),
+      error: (err, stack) => Text('Error: $err'),
+    );
   }
 }
 
@@ -5333,7 +5288,7 @@ Drawer _buildDrawer(BuildContext context) {
                                     padding: const EdgeInsets.symmetric(
                                         vertical: 0.0, horizontal: 6.0),
                                     child: Icon(Icons.info, color: hintColor)),
-                                Text(APP_VERSION,
+                                Text(APP_VERSION_FULL,
                                     style: TextStyle(
                                         color: hintColor, fontSize: 14))
                               ]),

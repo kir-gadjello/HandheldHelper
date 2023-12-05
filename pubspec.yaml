@@ -55,7 +55,7 @@ dependencies:
   flutter_downloader: ^1.11.4
   dio: ^5.3.3
   permission_handler: ^11.0.1
-  flutter_fast_forms: ^12.0.0
+  flutter_fast_forms: ^13.0.0
   getwidget: ^4.0.0
   external_path: ^1.0.3
   flutter_color: ^2.1.0
@@ -69,8 +69,9 @@ dependencies:
   filesystem_picker: ^4.0.0
   riverpod: ^2.4.8
   flutter_riverpod: ^2.4.8
-  riverpod_annotation: ^2.3.2
+  riverpod_annotation: ^2.3.3
   webview_flutter: ^4.4.2
+  flutter_form_builder: ^9.1.1
 
 dev_dependencies:
   ffigen: ^10.0.0
@@ -87,6 +88,10 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^3.0.1
   test: ^1.24.3
+  riverpod_generator: ^2.3.9
+  build_runner: ^2.4.7
+  custom_lint: ^0.5.7
+  riverpod_lint: ^2.3.7
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

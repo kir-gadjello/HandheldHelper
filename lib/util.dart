@@ -242,3 +242,29 @@ class AutoClearMap<K, V> extends MapBase<K, V> {
     return entry?.value;
   }
 }
+
+String limitText(String text, int max_out_len,
+    {bool ellipsis = true, int? max_n_lines}) {
+  int start = 0;
+  int end = max_out_len;
+
+  if (end > text.length) {
+    end = text.length;
+  }
+
+  String limitedText = text.substring(start, end);
+
+  if (max_n_lines != null) {
+    var lines = limitedText.split('\n');
+    int linesCount = lines.length;
+    if (linesCount > max_n_lines) {
+      limitedText = lines.sublist(0, max_n_lines).join('\n');
+    }
+  }
+
+  if (ellipsis && end < text.length) {
+    limitedText += '...';
+  }
+
+  return limitedText;
+}
