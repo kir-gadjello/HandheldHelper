@@ -65,7 +65,7 @@ dependencies:
   system_info2: ^4.0.0
   disk_space_plus: ^0.2.3
   desktop_disk_space: ^0.0.1
-  background_downloader: ^7.12.3
+  background_downloader: ^8.0.1
   filesystem_picker: ^4.0.0
   riverpod: ^2.4.8
   flutter_riverpod: ^2.4.8
@@ -123,6 +123,9 @@ flutter:
      - family: JetBrainsMono
        fonts:
          - asset: fonts/JetBrainsMonoNL-Light.ttf
+     - family: Inter
+       fonts:
+         - asset: fonts/Inter.ttc
 
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages

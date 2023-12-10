@@ -24,7 +24,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:system_info2/system_info2.dart';
 import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:desktop_disk_space/desktop_disk_space.dart';
-import 'package:background_downloader/background_downloader.dart';
+import 'package:background_downloader/background_downloader.dart'
+    show
+        FileDownloader,
+        BaseDirectory,
+        Updates,
+        TaskStatus,
+        TaskProgressUpdate,
+        TaskStatusUpdate,
+        DownloadTask;
 import 'package:filesystem_picker/filesystem_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -40,7 +48,7 @@ final String APP_VERSION = "0.1.0";
 final String APP_VERSION_FULL =
     "βv$APP_VERSION-${APP_COMMIT_HASH.substring(0, 8)}";
 final String APP_TITLE = isMobile() ? APP_TITLE_SHORT : APP_TITLE_FULL;
-const APPBAR_WIDTH = 220.0;
+const APPBAR_WIDTH = 230.0;
 const DESKTOP_MAX_CONTENT_WIDTH = 820.0;
 const DEFAULT_THEME_DARK = true;
 const MOBILE_DRAWER_TP = 84.0;
@@ -1370,7 +1378,7 @@ class EnabledButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
-        primary: Colors.lightGreen, // Text color when enabled
+        foregroundColor: Colors.lightGreen, // Text color when enabled
         side: BorderSide(color: Colors.lightGreen), // Border color when enabled
       ).merge(
         ButtonStyle(
@@ -1769,7 +1777,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
                   : () => _pickFileOrDirectory(context,
                       initialPath: _path, allowedExtensions: allowedExtensions),
               style: ElevatedButton.styleFrom(
-                primary: _status == Status.succeeded
+                foregroundColor: _status == Status.succeeded
                     ? Colors.lightGreen
                     : _status == Status.failed
                         ? widget.errBgBtnColor
@@ -1895,7 +1903,7 @@ class CheckmarkedTextRow extends StatelessWidget {
               child: Text(retryLabel!),
               onPressed: retryFn,
               style: TextButton.styleFrom(
-                primary: Colors.black,
+                foregroundColor: Colors.black,
               ),
             ),
         ],
@@ -2680,12 +2688,20 @@ bool isCodePlayable(String? code, {maxCheckLength = 128}) {
 }
 
 void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
+  ret.customTextOpacity = null;
+  ret.customBackgroundColor = Colors.transparent;
+  ret.disableCodeHighlight = false;
+
   if (flags?.containsKey("_canceled_by_user") ?? false) {
     ret.customBackgroundColor = Colors.orange.shade600;
     ret.customTextColor = Colors.black;
   } else if (flags?.containsKey("_interrupted") ?? false) {
     ret.customBackgroundColor = const Color.fromRGBO(200, 80, 80, 1.0);
     ret.customTextColor = Colors.white;
+  } else if (flags?.containsKey("_is_ephemeral") ?? false) {
+    ret.customTextOpacity = 0.5;
+    ret.customBackgroundColor = Colors.transparent;
+    ret.disableCodeHighlight = true;
   }
 }
 
@@ -3237,21 +3253,26 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   Future<void> create_new_chat(
       {system_prompt = hermes_sysmsg,
       Map<String, dynamic> custom_properties = const {}}) async {
+    var sys_msg_metadata = {
+      "_is_ephemeral": true,
+      "_is_system_message_with_prompt": system_prompt,
+      "_llm_modelpath": llm.modelpath,
+      ...custom_properties
+    };
+
     var firstMsg = ChatMessage(
         text:
             "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', system_prompt)}__",
         user: user_SYSTEM,
         createdAt: DateTime.now(),
-        customProperties: {
-          "_is_system_message_with_prompt": system_prompt,
-          "_llm_modelpath": llm.modelpath,
-          ...custom_properties
-        });
+        customProperties: sys_msg_metadata);
 
     _current_chat = await chatManager.createChat(
         firstMessageText: firstMsg.text,
         firstMessageUsername: "SYSTEM",
         firstMessageMeta: firstMsg.customProperties);
+
+    markChatMessageSpecial(firstMsg, sys_msg_metadata);
 
     _messages = [firstMsg];
 
@@ -3412,6 +3433,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   Future<void> addMsg(ChatMessage m, {Map<String, dynamic>? meta}) async {
     Chat current = await getCurrentChat();
+
+    if (_messages.isNotEmpty &&
+        (_messages[0].customProperties?.containsKey("_is_ephemeral") ??
+            false)) {
+      _messages[0].customProperties?.remove("_is_ephemeral");
+      markChatMessageSpecial(_messages[0], _messages[0].customProperties);
+    }
 
     await chatManager.addMessageToChat(current.uuid, m.text, "user",
         meta: meta);
@@ -3609,7 +3637,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   Future<void> initAIifNotAlready(
-      {bool force_default_model = false,
+      {bool force_default_model = true,
+      bool force_new_chat_after_model_change = true,
       bool attempt_restore_chat = true,
       void Function(bool)? onInitDone}) async {
     if (_msg_streaming || (!force_default_model && _initial_modelload_done)) {
@@ -3675,7 +3704,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             if (success) {
               _initial_modelload_done = true;
               print("ActiveChatDialogState: attempting to restore state...");
-              if (!attempt_restore_chat || fallback) {
+              if (force_new_chat_after_model_change ||
+                  !attempt_restore_chat ||
+                  fallback) {
                 // custom model could not be loaded, the history would be, strictly speaking, invalid
                 create_new_chat();
               } else {
@@ -3760,6 +3791,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       // User canceled the picker
     }
   }
+
+  ui_show_model_runtime_settings_menu() {}
 
   executeChatShare() {
     FlutterClipboard.copy(msgs_toJson());
@@ -4172,38 +4205,49 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               showCurrentUserAvatar: false,
               showOtherUsersAvatar: false,
               messageDecorationBuilder: (ChatMessage message,
-                      ChatMessage? previousMessage, ChatMessage? nextMessage) =>
-                  message.user.firstName == "User"
-                      ? BoxDecoration(
-                          color: userMsgColor,
-                          borderRadius: const BorderRadius.only(
-                              topRight: Radius.circular(3.0),
-                              bottomRight: Radius.circular(3.0),
-                              topLeft: Radius.circular(14.0),
-                              bottomLeft: Radius.circular(14.0)),
-                          border: Border(
-                            right: BorderSide(
-                              color:
-                                  userMsgBorderColor, // Change this to your desired color
-                              width: 2, // Change this to your desired width
-                            ),
-                          ),
-                        )
-                      : BoxDecoration(
-                          color: aiMsgColor,
-                          borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(3.0),
-                              bottomLeft: Radius.circular(3.0),
-                              topRight: Radius.circular(14.0),
-                              bottomRight: Radius.circular(14.0)),
-                          border: Border(
-                            left: BorderSide(
-                              color:
-                                  aiMsgBorderColor, // Change this to your desired color
-                              width: 2, // Change this to your desired width
-                            ),
-                          ),
-                        ),
+                  ChatMessage? previousMessage, ChatMessage? nextMessage) {
+                if (message.user.firstName == "User") {
+                  return BoxDecoration(
+                    color: userMsgColor,
+                    borderRadius: const BorderRadius.only(
+                        topRight: Radius.circular(3.0),
+                        bottomRight: Radius.circular(3.0),
+                        topLeft: Radius.circular(14.0),
+                        bottomLeft: Radius.circular(14.0)),
+                    border: Border(
+                      right: BorderSide(
+                        color:
+                            userMsgBorderColor, // Change this to your desired color
+                        width: 2, // Change this to your desired width
+                      ),
+                    ),
+                  );
+                } else {
+                  var _is_system =
+                      message.user.firstName?.toLowerCase() == "system";
+                  Color col = aiMsgColor;
+                  if (_is_system &&
+                      (message.customProperties?.containsKey("_is_ephemeral") ??
+                          false)) {
+                    col = Colors.grey.shade100.withOpacity(0.5);
+                  }
+                  return BoxDecoration(
+                    color: col,
+                    borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(3.0),
+                        bottomLeft: Radius.circular(3.0),
+                        topRight: Radius.circular(14.0),
+                        bottomRight: Radius.circular(14.0)),
+                    border: Border(
+                      left: BorderSide(
+                        color:
+                            aiMsgBorderColor, // Change this to your desired color
+                        width: 2, // Change this to your desired width
+                      ),
+                    ),
+                  );
+                }
+              },
               onLongPressMessage: (m) {
                 String msg = m.text;
                 FlutterClipboard.copy(msg);
@@ -4337,6 +4381,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                       case "model_switch":
                         if (actionsEnabled) ui_show_model_switch_menu();
                         break;
+                      case "model_runtime_settings":
+                        ui_show_model_runtime_settings_menu();
+                        break;
                       case "share":
                         executeChatShare();
                         break;
@@ -4365,6 +4412,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                                 color: Colors.black,
                               ),
                               Text("  Switch model")
+                            ])),
+                    const PopupMenuItem<String>(
+                        value: "model_runtime_settings",
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.psychology_sharp,
+                                color: Colors.black,
+                              ),
+                              Text("  Sampler settings")
                             ])),
                     const PopupMenuItem<String>(
                         value: "share",
@@ -4978,14 +5036,12 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   }
 
   Future<void> restore() async {
-    // Your async restore logic here
     state = const AsyncValue.loading();
     final restoredSettings = await restoreSettings();
     state = AsyncValue.data(restoredSettings);
   }
 
   Future<Map<String, dynamic>> restoreSettings() async {
-    // Your logic to restore settings here
     var ret =
         await _metadataManager.getMetadata("_app_settings", defaultValue: {});
     if (ret is Map) {
@@ -5078,7 +5134,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               )
                             ],
                           ),
-                          FormBuilderTextField(name: 'field1'),
+                          FormBuilderTextField(
+                              decoration: InputDecoration(
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.red,
+                                      width: 3,
+                                      style: BorderStyle.solid),
+                                ),
+                                hintText: 'Enter text',
+                              ),
+                              name: 'field1'),
                           FormBuilderTextField(name: 'field2'),
                           // Add more FormBuilderTextField widgets as needed
                         ],
@@ -5474,6 +5540,7 @@ class HandheldHelper extends StatelessWidget {
   ThemeData getAppTheme(BuildContext context, bool isDarkTheme) {
     var baseTheme = ThemeData(
       useMaterial3: true,
+      fontFamily: 'Inter',
       colorScheme: isDarkTheme
           ? ColorScheme.fromSeed(
               seedColor: Colors.deepOrange,

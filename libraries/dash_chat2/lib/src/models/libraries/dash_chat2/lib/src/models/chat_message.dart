@@ -7,6 +7,8 @@ class ChatMessage {
     required this.createdAt,
     this.customBackgroundColor,
     this.customTextColor,
+    this.customTextOpacity,
+    this.disableCodeHighlight = false,
     this.text = '',
     this.medias,
     this.quickReplies,
@@ -80,6 +82,8 @@ class ChatMessage {
 
   Color? customBackgroundColor;
   Color? customTextColor;
+  double? customTextOpacity;
+  bool disableCodeHighlight;
 
   Widget Function(BuildContext)? trailingBuilder;
 

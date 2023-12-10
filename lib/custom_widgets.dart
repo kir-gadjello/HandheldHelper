@@ -115,7 +115,9 @@ Widget MdViewer(
     bool isOwnMessage,
     MessageOptions messageOptions,
     Color? customBackgroundColor,
-    Color? customTextColor) {
+    Color? customTextColor,
+    double? customTextOpacity,
+    bool disableCodeHighlight) {
   var extThemeData = Theme.of(context).extension<ExtendedThemeData>()!;
   var codeBackgroundColor = extThemeData.codeBackgroundColor;
   var activeColor = Theme.of(context).primaryColor;
@@ -137,6 +139,17 @@ Widget MdViewer(
 
   var codeTextColor = extThemeData.codeTextColor!;
   var codeBgColor = extThemeData.codeBackgroundColor!;
+
+  if (customTextOpacity != null) {
+    textColor = textColor.withOpacity(customTextOpacity);
+    codeTextColor = codeTextColor.withOpacity(customTextOpacity);
+    codeBgColor = codeBgColor.withOpacity(customTextOpacity);
+  }
+
+  if (disableCodeHighlight) {
+    codeTextColor = textColor;
+    codeBgColor = bgColor;
+  }
 
   final codeSpanStyle = TextStyle(
     fontFamily: 'JetBrainsMono',
@@ -236,8 +249,15 @@ class RichMessageText extends StatelessWidget {
         Wrap(
           children: USE_MARKDOWN
               ? [
-                  MdViewer(message.text, context, isOwnMessage, messageOptions,
-                      message.customBackgroundColor, message.customTextColor)
+                  MdViewer(
+                      message.text,
+                      context,
+                      isOwnMessage,
+                      messageOptions,
+                      message.customBackgroundColor,
+                      message.customTextColor,
+                      message.customTextOpacity,
+                      message.disableCodeHighlight)
                 ]
               : getMessage(context),
         ),
