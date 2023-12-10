@@ -2689,7 +2689,7 @@ bool isCodePlayable(String? code, {maxCheckLength = 128}) {
 
 void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
   ret.customTextOpacity = null;
-  ret.customBackgroundColor = Colors.transparent;
+  ret.customBackgroundColor = null;
   ret.disableCodeHighlight = false;
 
   if (flags?.containsKey("_canceled_by_user") ?? false) {
@@ -3267,10 +3267,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         createdAt: DateTime.now(),
         customProperties: sys_msg_metadata);
 
+    // do not store _is_ephemeral flag
+    var saved_metadata =
+        Map<String, dynamic>.from(firstMsg.customProperties ?? {});
+    saved_metadata.remove("_is_ephemeral");
     _current_chat = await chatManager.createChat(
         firstMessageText: firstMsg.text,
         firstMessageUsername: "SYSTEM",
-        firstMessageMeta: firstMsg.customProperties);
+        firstMessageMeta: saved_metadata);
 
     markChatMessageSpecial(firstMsg, sys_msg_metadata);
 
@@ -3278,7 +3282,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
     await persistState();
 
-    var tokens_used = sync_messages_to_llm();
+    sync_messages_to_llm();
 
     setState(() {
       _initialized = true;
@@ -4641,7 +4645,14 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
-      body: _buildSearchResults(),
+      body: Center(
+          child: Container(
+              constraints: isMobile()
+                  ? null
+                  : const BoxConstraints(
+                      maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
+                    ),
+              child: _buildSearchResults())),
     );
   }
 }
@@ -4653,70 +4664,85 @@ Widget buildDashChatHistory(BuildContext context, List<ChatMessage> messages) {
   var textColor = Theme.of(context).listTileTheme.textColor;
   var hintColor = Theme.of(context).hintColor;
 
-  return DashChat(
-    inputOptions: InputOptions(
-        sendOnEnter: false,
-        sendOnShiftEnter: true,
-        alwaysShowSend: true,
-        inputToolbarMargin: const EdgeInsets.all(0.0),
-        inputToolbarPadding: const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
-        inputMaxLines: 15,
-        sendButtonBuilder: (Function fct) => InkWell(
-              onTap: () => fct(),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-                child: Stack(children: [
-                  Icon(
-                    size: 40,
-                    Icons.send,
-                    color: hintColor,
+  return Center(
+      child: Container(
+          constraints: isMobile()
+              ? null
+              : const BoxConstraints(
+                  maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
+                ),
+          child: DashChat(
+            inputOptions: InputOptions(
+                sendOnEnter: false,
+                sendOnShiftEnter: true,
+                alwaysShowSend: true,
+                inputToolbarMargin: const EdgeInsets.all(0.0),
+                inputToolbarPadding:
+                    const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
+                inputMaxLines: 15,
+                sendButtonBuilder: (Function fct) => InkWell(
+                      onTap: () => fct(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 10),
+                        child: Stack(children: [
+                          Icon(
+                            size: 40,
+                            Icons.send,
+                            color: hintColor,
+                          ),
+                        ]),
+                      ),
+                    ),
+                inputDecoration: InputDecoration(
+                  isDense: true,
+                  hintText:
+                      "Read-only historical chat view. Use context menu to continue.",
+                  hintStyle: TextStyle(color: hintColor),
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  contentPadding: const EdgeInsets.only(
+                    left: 18,
+                    top: 10,
+                    bottom: 10,
                   ),
-                ]),
-              ),
-            ),
-        inputDecoration: InputDecoration(
-          isDense: true,
-          hintText:
-              "Read-only historical chat view. Use context menu to continue.",
-          hintStyle: TextStyle(color: hintColor),
-          filled: true,
-          fillColor: Colors.grey[100],
-          contentPadding: const EdgeInsets.only(
-            left: 18,
-            top: 10,
-            bottom: 10,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12.0),
-            borderSide: const BorderSide(
-              width: 0,
-              style: BorderStyle.none,
-            ),
-          ),
-        ),
-        inputToolbarStyle:
-            BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
-        inputDisabled: true),
-    messageOptions: MessageOptions(
-        fullWidthRow: true, // || isMobile(),
-        containerColor: aiMsgColor!,
-        currentUserContainerColor: userMsgColor!,
-        textColor: textColor!,
-        currentUserTextColor: textColor!,
-        messageTextBuilder: customMessageTextBuilder,
-        showCurrentUserAvatar: false,
-        showOtherUsersAvatar: false,
-        onLongPressMessage: (m) {
-          String msg = "${m.user.getFullName()}: ${m.text}";
-          FlutterClipboard.copy(msg);
-          showSnackBarTop(context,
-              "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
-        }),
-    onSend: (value) {},
-    currentUser: user,
-    messages: messages,
-  );
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12.0),
+                    borderSide: const BorderSide(
+                      width: 0,
+                      style: BorderStyle.none,
+                    ),
+                  ),
+                ),
+                inputToolbarStyle:
+                    BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
+                inputDisabled: true),
+            messageOptions: MessageOptions(
+                maxWidth: isMobile()
+                    ? null
+                    : max(
+                        0,
+                        min(MediaQuery.of(context).size.width,
+                                DESKTOP_MAX_CONTENT_WIDTH) -
+                            30.0),
+                fullWidthRow: true,
+                containerColor: aiMsgColor!,
+                currentUserContainerColor: userMsgColor!,
+                textColor: textColor!,
+                currentUserTextColor: textColor!,
+                messageTextBuilder: customMessageTextBuilder,
+                showCurrentUserAvatar: false,
+                showOtherUsersAvatar: false,
+                onLongPressMessage: (m) {
+                  String msg = "${m.user.getFullName()}: ${m.text}";
+                  FlutterClipboard.copy(msg);
+                  showSnackBarTop(context,
+                      "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
+                }),
+            onSend: (value) {},
+            currentUser: user,
+            messages: messages,
+          )));
 }
 
 class SingleChatHistoryPage extends StatefulWidget {
@@ -4967,7 +4993,7 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   void initState() {
     super.initState();
     _chats = _chatManager.getMessagesFromChats([],
-        sort_chats: true, sort_reversed: true, limit: 3);
+        sort_chats: true, sort_reversed: true, filter_empty: true, limit: 3);
   }
 
   @override
@@ -4987,27 +5013,34 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
           } else if (snapshot.hasError) {
             return Text('Error: ${snapshot.error}');
           } else {
-            return ListView.builder(
-              itemCount: snapshot.data?.length ?? 0,
-              itemBuilder: (context, index) {
-                var (chat, messages) = snapshot.data![index];
-                return buildListOfChatsWithMessages(
-                    context,
-                    chat,
-                    messages.isNotEmpty
-                        ? messages.sublist(1)
-                        : [
-                            Message.placeholder(
-                                "system", "<conversation is empty>")
-                          ],
-                    onChatTap: (Uuid chatId) {
-                      navigate(AppPage.chathistory,
-                          parameters: [chatId.toString()]);
-                    },
-                    preprocessMessage: (m) =>
-                        Text(limitText(m, 512, max_n_lines: 5)));
-              },
-            );
+            return Center(
+                child: Container(
+                    constraints: isMobile()
+                        ? null
+                        : const BoxConstraints(
+                            maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
+                          ),
+                    child: ListView.builder(
+                      itemCount: snapshot.data?.length ?? 0,
+                      itemBuilder: (context, index) {
+                        var (chat, messages) = snapshot.data![index];
+                        return buildListOfChatsWithMessages(
+                            context,
+                            chat,
+                            messages.isNotEmpty
+                                ? messages.sublist(1)
+                                : [
+                                    Message.placeholder(
+                                        "system", "<conversation is empty>")
+                                  ],
+                            onChatTap: (Uuid chatId) {
+                              navigate(AppPage.chathistory,
+                                  parameters: [chatId.toString()]);
+                            },
+                            preprocessMessage: (m) =>
+                                Text(limitText(m, 512, max_n_lines: 5)));
+                      },
+                    )));
           }
         },
       ),

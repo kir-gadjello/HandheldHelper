@@ -881,9 +881,10 @@ class ChatManager {
   }
 
   Future<List<(Chat, List<Message>)>> getMessagesFromChats(List<Uuid> chats,
-      {sort_chats = false,
-      sort_reversed = false,
-      msgs_reversed = false,
+      {bool sort_chats = false,
+      bool sort_reversed = false,
+      bool msgs_reversed = false,
+      bool filter_empty = false,
       int? limit}) async {
     final db = await _databaseHelper.database;
 
@@ -921,6 +922,11 @@ class ChatManager {
 
       List<Message> messages =
           results.map((result) => Message.fromJson(result)).toList();
+
+      // if only system prompt message
+      if (filter_empty && messages.length <= 1) {
+        continue;
+      }
 
       chatMessages.add((chatsByUuid[chatId]!, messages));
     }
