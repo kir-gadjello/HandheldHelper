@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/widgets.dart';
 import 'package:handheld_helper/db.dart';
 import 'package:handheld_helper/gguf.dart';
 import 'package:path/path.dart' as Path;
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
@@ -381,52 +383,103 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
   }
 }
 
-Widget showWarningModal({
-  required String title,
-  required String content,
-  required String buttonText,
-  VoidCallback? onClose,
-}) {
-  return Dialog(
-    backgroundColor: Colors.transparent,
-    child: Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Icon(
-            Icons.warning,
-            size: 100,
-            color: Colors.orange,
-          ),
-          const SizedBox(height: 20),
-          Text(
-            title,
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            content,
-            style: TextStyle(fontSize: 18),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            child: Text(buttonText),
-            onPressed: () {
-              if (onClose != null) {
-                onClose();
-              }
-              // Navigator.of(context).pop();
-            },
-          ),
-        ],
-      ),
-    ),
-  );
+Widget widgetOrDefault(dynamic content, {TextStyle? defaultTextStyle}) {
+  if (content is String) {
+    return Text(content, style: defaultTextStyle);
+  } else if (content is Widget) {
+    return content;
+  } else {
+    return const Text('');
+  }
+}
+
+Widget maybeExpanded({required Widget child, bool expanded = false}) {
+  if (expanded) {
+    return Expanded(child: child);
+  }
+  return child;
+}
+
+Widget showOverlay(BuildContext context,
+    {required dynamic title,
+    required dynamic content,
+    required String buttonText,
+    VoidCallback? onClose,
+    required int padding,
+    bool no_icon = false,
+    bool no_controls = false,
+    bool backdrop_glass = false,
+    bool expanded = false}) {
+  return GestureDetector(
+      onTap: () {
+        print("MODAL: OUTER CLICK CLOSE");
+        if (onClose != null) {
+          onClose();
+        }
+      }, // Closing the sheet.
+      child: Center(
+          child: Container(
+              height: MediaQuery.of(context).size.height,
+              width: MediaQuery.of(context).size.width,
+              color: Colors.transparent,
+              child: maybeBackdrop(
+                  backdrop_glass: backdrop_glass,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: () {},
+                          child: Container(
+                            height: expanded
+                                ? MediaQuery.of(context).size.height * 0.8
+                                : null,
+                            width: expanded
+                                ? MediaQuery.of(context).size.width * 0.8
+                                : null,
+                            padding: EdgeInsets.all(padding.toDouble()),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: <Widget>[
+                                if (!no_icon) ...[
+                                  const Icon(
+                                    Icons.warning,
+                                    size: 100,
+                                    color: Colors.orange,
+                                  ),
+                                  const SizedBox(height: 20)
+                                ],
+                                widgetOrDefault(
+                                  title,
+                                  defaultTextStyle: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 20),
+                                widgetOrDefault(
+                                  content,
+                                  defaultTextStyle: TextStyle(fontSize: 18),
+                                ),
+                                const SizedBox(height: 20),
+                                if (!no_controls)
+                                  ElevatedButton(
+                                    child: Text(buttonText),
+                                    onPressed: () {
+                                      if (onClose != null) {
+                                        onClose();
+                                      }
+                                      // Navigator.of(context).pop();
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ),
+                        )
+                      ])))));
 }
 
 Future<File> moveFile(File sourceFile, String newPath) async {
@@ -1355,6 +1408,16 @@ class _HoverableTextState extends State<HoverableText> {
       ),
     );
   }
+}
+
+Widget maybeBackdrop({bool backdrop_glass = false, required Widget child}) {
+  if (backdrop_glass) {
+    return BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+        child: Container(
+            color: const Color.fromRGBO(0, 0, 0, 0.35), child: child));
+  }
+  return child;
 }
 
 const BTN_DISABLED_SHADE = 200;
@@ -2832,39 +2895,66 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   String? _htmlCode;
 
-  var _modalState;
+  Map<String, dynamic>? _modalState;
 
-  void _showWarningModal({
-    String title = 'Warning',
-    String content = 'Default warning message.',
+  void _hideModal() {
+    if (_modalState?['onClose'] != null) {
+      _modalState?['onClose']();
+    }
+    setState(() {
+      _modalState = null;
+    });
+  }
+
+  void _showModal({
+    dynamic title = 'Warning',
+    dynamic content = 'Default warning message.',
+    String? toggle_key,
     String buttonText = 'OK',
+    bool no_icon = false,
+    bool no_controls = false,
+    bool toggle = false,
+    bool backdrop_glass = false,
+    int padding = 20,
+    bool expanded = false,
     VoidCallback? onClose,
   }) {
+    if (toggle) {
+      if (_modalState?['toggle_key'] == toggle_key ||
+          (title is String && _modalState?['title'] == title)) {
+        print("TOGGLE MODAL: OFF");
+        _hideModal();
+        return;
+      }
+    }
     setState(() {
       _modalState = {
         'title': title,
         'content': content,
         'buttonText': buttonText,
-        'onClose': () {
-          setState(() {
-            _modalState = null;
-          });
-          if (onClose != null) {
-            onClose();
-          }
-        },
+        'no_icon': no_icon,
+        'no_controls': no_controls,
+        'backdrop_glass': backdrop_glass,
+        'padding': padding,
+        'onClose': onClose,
+        'expanded': expanded,
       };
     });
   }
 
   Widget buildModals(BuildContext context) {
     if (_modalState != null) {
-      return showWarningModal(
-        title: _modalState['title'],
-        content: _modalState['content'],
-        buttonText: _modalState['buttonText'],
-        onClose: _modalState['onClose'],
-      );
+      return showOverlay(context,
+          title: _modalState?['title'],
+          content: _modalState?['content'],
+          buttonText: _modalState?['buttonText'],
+          expanded: _modalState?['expanded'] ?? false,
+          padding: _modalState?['padding'], onClose: () {
+        _hideModal();
+      },
+          no_icon: _modalState?['no_icon'] ?? false,
+          no_controls: _modalState?['no_controls'] ?? false,
+          backdrop_glass: _modalState?['backdrop_glass'] ?? false);
     } else {
       return Container();
     }
@@ -3526,7 +3616,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             }
           } else {
             // TODO: handle init failure
-            _showWarningModal(
+            _showModal(
                 content:
                     "Could not load the model at $new_modelpath\nSystem will try to load the default model when you dismiss this modal.",
                 onClose: () {
@@ -3722,7 +3812,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             } else {
               // TODO: handle failure better
               _initial_modelload_done = false;
-              _showWarningModal(
+              _showModal(
                   content:
                       "Could not load the model at $modelpath\nSystem will try to load the default model when you dismiss this modal.",
                   onClose: () {
@@ -3796,7 +3886,43 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
   }
 
-  ui_show_model_runtime_settings_menu() {}
+  ui_show_model_runtime_settings_menu() {
+    var modalHeaderColor = Colors.black;
+    bool expanded = true;
+    _showModal(
+        title: Row(
+            mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(
+                Icons.psychology_sharp,
+                color: modalHeaderColor,
+              ),
+              const SizedBox(width: 10),
+              Text("inference settings",
+                  style: TextStyle(color: modalHeaderColor, fontSize: 20.0)),
+              const SizedBox(width: 10),
+              IconButton(
+                icon: Icon(
+                  Icons.close_sharp,
+                  color: modalHeaderColor,
+                ),
+                onPressed: () {
+                  _hideModal();
+                },
+                color: modalHeaderColor,
+              )
+            ]),
+        toggle_key: "inference settings",
+        toggle: true,
+        no_icon: true,
+        no_controls: true,
+        backdrop_glass: true,
+        padding: 12,
+        content: "test",
+        expanded: expanded);
+  }
 
   executeChatShare() {
     FlutterClipboard.copy(msgs_toJson());
@@ -4085,7 +4211,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (_app_setup_done) {
       initAIifNotAlready();
       mainWidget = Expanded(
-          child: Container(
+          child: Center(
+              child: Container(
         constraints: isMobile()
             ? null
             : const BoxConstraints(
@@ -4274,7 +4401,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           },
           messages: _messages,
         ),
-      ));
+      )));
       if (!_initialized) {
         mainWidget = Stack(
           children: <Widget>[
@@ -4353,16 +4480,16 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                     ),
                     onPressed: ui_stop_llm_generation,
                   ),
-                IconButton(
-                  padding: actionIconPadding,
-                  disabledColor: disabledColor,
-                  icon: Icon(
-                    size: actionIconSize,
-                    Icons.psychology_sharp,
-                    color: iconColor,
-                  ),
-                  onPressed: actionsEnabled ? ui_show_settings_menu : null,
-                ),
+                // IconButton(
+                //   padding: actionIconPadding,
+                //   disabledColor: disabledColor,
+                //   icon: Icon(
+                //     size: actionIconSize,
+                //     Icons.psychology_sharp,
+                //     color: iconColor,
+                //   ),
+                //   onPressed: actionsEnabled ? ui_show_settings_menu : null,
+                // ),
                 IconButton(
                   padding: actionIconPadding,
                   disabledColor: disabledColor,
@@ -4426,7 +4553,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
                                 Icons.psychology_sharp,
                                 color: Colors.black,
                               ),
-                              Text("  Sampler settings")
+                              Text("  Inference settings")
                             ])),
                     const PopupMenuItem<String>(
                         value: "share",
