@@ -7,7 +7,7 @@ import 'package:path/path.dart' as Path;
 import 'package:ffi/ffi.dart';
 import 'dart:async';
 import 'package:crypto/crypto.dart';
-
+import 'util.dart';
 import 'llamarpc_generated_bindings.dart' as binding;
 
 const kDebugMode = true;
@@ -28,6 +28,102 @@ String getFileHash(String filePath) {
   return digest.toString();
 }
 
+bool validatePromptFormatTemplate(Map<String, dynamic> fmt) {
+  return fmt['template'] is String &&
+      fmt['historyTemplate'] is String &&
+      fmt['char'] is String &&
+      fmt['user'] is String;
+}
+
+String extractSeparatorFromPromptTemplate(Map<String, dynamic> fmt,
+    {String fallback = "<\s>"}) {
+  if (fmt['separator'] is String) {
+    return fmt['separator'];
+  }
+
+  String tpl = fmt['historyTemplate'];
+  var tpl_parts = tpl.split("{{message}}");
+  if (tpl_parts.length > 1) {
+    String prefix = tpl_parts.first;
+    String suffix = tpl_parts.last;
+    if (!prefix.contains(suffix) && suffix != "\n") {
+      return suffix;
+    } else {
+      return suffix + prefix.split("{{char}}").first + fmt['user'];
+    }
+  }
+
+  print(
+      "Warning: cannot determine separator for template, falling back to $fallback");
+
+  return fallback;
+}
+
+String convertSpecialCharacters(String str) {
+  Map<String, int> specialChars = {
+    '\\n': 10, // newline
+    '\\t': 9, // tab
+    '\\r': 13, // carriage return
+    '\\b': 8, // backspace
+    '\\f': 12, // form feed
+    '\\v': 11, // vertical tab
+    '\\\\': 92, // backslash
+    '\\\'': 39, // single quote
+    '\\"': 34, // double quote
+  };
+
+  for (var entry in specialChars.entries) {
+    str = str.replaceAll(entry.key, String.fromCharCode(entry.value));
+  }
+
+  return str;
+}
+
+Map<String, dynamic> convertSpecialCharactersInMap(Map<String, dynamic> map) {
+  Map<String, dynamic> ret = {};
+  map.forEach((key, value) {
+    if (value is String) {
+      ret[key] = convertSpecialCharacters(value);
+    } else {
+      ret[key] = value;
+    }
+  });
+  return ret;
+}
+
+String formatConversation(
+    Map<String, dynamic> json, List<AIChatMessage> history,
+    {String prompted_name = "assistant"}) {
+  String template = json['template']!;
+  String historyTemplate = json['historyTemplate']!;
+  String aiName = json['char']!;
+  String userName = json['user']!;
+
+  Map<String, String> names = {"user": userName, "assistant": aiName};
+
+  String nameFromRole(String role) {
+    return names[role] ?? role;
+  }
+
+  String? sysmsg;
+
+  if (history.first.role.toLowerCase() == "system") {
+    sysmsg = history[0].content;
+    history = history.sublist(1);
+  }
+
+  var formattedHistory = history.map((message) {
+    return historyTemplate
+        .replaceAll('{{name}}', nameFromRole(message.role))
+        .replaceAll('{{message}}', message.content);
+  }).join();
+
+  return template
+      .replaceAll('{{prompt}}', sysmsg ?? '')
+      .replaceFirst('{{history}}', formattedHistory)
+      .replaceAll('{{char}}', nameFromRole(prompted_name));
+}
+
 class LLMPromptFormat {
   String name;
   String separator;
@@ -38,17 +134,33 @@ class LLMPromptFormat {
       this.separator = "<|im_end|>",
       this.formatter = format_chatml,
       this.fixer = fix_chatml_markup});
+
+  factory LLMPromptFormat.fromTemplate(Map<String, dynamic> fmt, String? name) {
+    if (!validatePromptFormatTemplate(fmt)) {
+      print("Could not load prompt format, falling back to ChatML");
+      return LLMPromptFormat();
+    }
+    var format = convertSpecialCharactersInMap(fmt);
+    name = name ?? "fmt-${genUuidString()}";
+    var separator = extractSeparatorFromPromptTemplate(format);
+    return LLMPromptFormat(
+        name: name,
+        separator: separator,
+        formatter: (List<AIChatMessage> history) =>
+            formatConversation(format, history),
+        fixer: create_fixer(separator));
+  }
 }
 
 final ChatMLPromptFormat = LLMPromptFormat();
 
-class LLAMAChatCompletion {
+class LLMChatCompletion {
   String prompt = "";
   int max_tokens;
   double temperature;
   List<String> stop;
 
-  LLAMAChatCompletion(
+  LLMChatCompletion(
     this.prompt, {
     this.max_tokens = 1280,
     this.temperature = 0.0,
@@ -125,7 +237,7 @@ String format_chatml(List<AIChatMessage> messages,
 }
 
 String Function(String) create_fixer(String sep) => (String s) {
-      s = trimLastCharacter(s, sep);
+      s = trim_suffix(s, sep);
       var si = s.indexOf(sep);
       if (si > -1) {
         s = s.substring(0, si);
@@ -134,7 +246,7 @@ String Function(String) create_fixer(String sep) => (String s) {
     };
 
 String fix_chatml_markup(String s) {
-  s = trimLastCharacter(s, "<|im_end|>");
+  s = trim_suffix(s, "<|im_end|>");
   var si = s.indexOf("<|im_end|>");
   if (si > -1) {
     s = s.substring(0, si);
@@ -146,11 +258,11 @@ String fix_chatml_markup(String s) {
   return s;
 }
 
-String trimLastCharacter(String srcStr, String pattern) {
+String trim_suffix(String srcStr, String pattern) {
   if (srcStr.length > 0) {
     if (srcStr.endsWith(pattern)) {
       final v = srcStr.substring(0, srcStr.length - pattern.length);
-      return trimLastCharacter(v, pattern);
+      return trim_suffix(v, pattern);
     }
     return srcStr;
   }
@@ -624,7 +736,8 @@ class LLMEngine {
     }
   }
 
-  bool advance({String? user_msg, bool fix_chatml = true}) {
+  bool advance(
+      {String? user_msg, bool fix_chatml = true, bool respect_eos = true}) {
     if (!initialized) {
       error = "Error: not initialized just yet";
       return false;
@@ -640,8 +753,12 @@ class LLMEngine {
     }
 
     try {
-      String api_query =
-          jsonEncode(LLAMAChatCompletion(prompt_format.formatter(msgs)));
+      String api_query = jsonEncode(LLMChatCompletion(
+        prompt_format.formatter(msgs),
+        stop: (respect_eos
+            ? ["</s>", prompt_format.separator]
+            : [prompt_format.separator]),
+      ));
 
       if (__DEBUG) print("DEBUG: api_query=${api_query}");
 
@@ -675,7 +792,8 @@ class LLMEngine {
     return false;
   }
 
-  bool start_advance_stream({String? user_msg, bool fix_chatml = true}) {
+  bool start_advance_stream(
+      {String? user_msg, bool fix_chatml = true, bool respect_eos = true}) {
     if (streaming) {
       error = "Error: already generating completion, cancel to restart";
       return false;
@@ -693,8 +811,12 @@ class LLMEngine {
     }
 
     try {
-      String api_query =
-          jsonEncode(LLAMAChatCompletion(prompt_format.formatter(msgs)));
+      String api_query = jsonEncode(LLMChatCompletion(
+        prompt_format.formatter(msgs),
+        stop: (respect_eos
+            ? ["</s>", prompt_format.separator]
+            : [prompt_format.separator]),
+      ));
 
       if (__DEBUG) print("DEBUG: api_query=${api_query}");
 

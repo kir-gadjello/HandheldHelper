@@ -410,6 +410,18 @@ Widget showOverlay(BuildContext context,
     bool no_controls = false,
     bool backdrop_glass = false,
     bool expanded = false}) {
+  // return RawKeyboardListener(
+  //     focusNode: FocusNode(),
+  //     onKey: (RawKeyEvent event) {
+  //       if (event is RawKeyDownEvent &&
+  //           event.logicalKey == LogicalKeyboardKey.escape) {
+  //         print("MODAL: ESC KEY PRESSED");
+  //         if (onClose != null) {
+  //           onClose();
+  //         }
+  //       }
+  //     },
+  //     child:
   return GestureDetector(
       onTap: () {
         print("MODAL: OUTER CLICK CLOSE");
@@ -435,7 +447,8 @@ Widget showOverlay(BuildContext context,
                                 ? MediaQuery.of(context).size.height * 0.8
                                 : null,
                             width: expanded
-                                ? MediaQuery.of(context).size.width * 0.8
+                                ? MediaQuery.of(context).size.width *
+                                    (isMobile() ? 0.95 : 0.8)
                                 : null,
                             padding: EdgeInsets.all(padding.toDouble()),
                             decoration: BoxDecoration(

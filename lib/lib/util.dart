@@ -4,6 +4,7 @@
 import 'dart:io';
 import 'dart:collection';
 import 'dart:ui';
+import 'dart:math';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
@@ -267,4 +268,16 @@ String limitText(String text, int max_out_len,
   }
 
   return limitedText;
+}
+
+String genUuidString({int length = 16}) {
+  final rng = Random();
+  final bytes = <int>[];
+  for (var i = 0; i < length; i++) {
+    bytes.add(rng.nextInt(256));
+  }
+  return bytes
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join('')
+      .toUpperCase();
 }
