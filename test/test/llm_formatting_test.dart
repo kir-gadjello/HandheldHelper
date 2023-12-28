@@ -25,14 +25,14 @@ void main() {
     expect(fix_chatml_markup("lorem ipsum"), "lorem ipsum");
   });
 
+  var msgs = [
+    AIChatMessage("system", "sys_msg"),
+    AIChatMessage("user", "user_msg"),
+  ];
+
   group('Templated prompt formats', () {
     Map<String, dynamic> fmts =
         jsonDecode(File("assets/known_prompt_formats.json").readAsStringSync());
-
-    var msgs = [
-      AIChatMessage("system", "sys_msg"),
-      AIChatMessage("user", "user_msg"),
-    ];
 
     test('vicuna', () {
       var loaded = LLMPromptFormat.fromTemplate(fmts["vicuna"], "vicuna");
@@ -43,6 +43,36 @@ void main() {
 
 USER: user_msg
 ASSISTANT:''');
+    });
+  });
+
+  group('Jinja prompt formats', () {
+    test('openchat', () {
+      const fmt_openchat =
+          "{{ bos_token }}{% for message in messages %}{{ 'GPT4 Correct ' + message['role'].title() + ': ' + message['content'] + '<|end_of_turn|>'}}{% endfor %}{% if add_generation_prompt %}{{ 'GPT4 Correct Assistant:' }}{% endif %}";
+
+      const fmt_chatml =
+          '''{% for message in messages %}{{'<|im_start|>' + message['role'].title() + '\n' + message['content'] + '<|im_end|>' + '\n'}}
+{% endfor %}''';
+
+      const fmt_broken =
+          '''{% for message in messages %}{{'<|im_start|>' + message['role'].title() + '\n'  + '<|im_end|>' + '\n'}}
+{% endfor %}''';
+
+      expect(validate_jinja_chat_template(fmt_openchat), true);
+      expect(validate_jinja_chat_template(fmt_chatml), true);
+      expect(validate_jinja_chat_template(fmt_broken), false);
+
+      var out = format_chat_jinja(fmt_openchat, msgs);
+
+      print("FORMATTED:\n$out");
+
+      expect(out,
+          "GPT4 Correct System: sys_msg<|end_of_turn|>GPT4 Correct User: user_msg<|end_of_turn|>GPT4 Correct Assistant:");
+
+      var sep = extractSeparatorFromJinjaTemplate(fmt_openchat);
+
+      expect(sep, "<|end_of_turn|>");
     });
   });
 }

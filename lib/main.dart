@@ -3,19 +3,18 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui';
+
 import 'package:flutter/widgets.dart';
 import 'package:handheld_helper/db.dart';
 import 'package:handheld_helper/gguf.dart';
 import 'package:path/path.dart' as Path;
 import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
-import 'custom_widgets.dart';
-import 'llm_engine.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_fast_forms/flutter_fast_forms.dart';
@@ -40,6 +39,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
+
+import 'custom_widgets.dart';
+import 'llm_engine.dart';
 import 'util.dart';
 import 'commit_hash.dart';
 
@@ -96,29 +98,41 @@ final APPROVED_LLMS = [
       prompt_format: MiniChatPromptFormat,
       sources: [
         "https://huggingface.co/afrideva/MiniChat-1.5-3B-GGUF/resolve/main/minichat-1.5-3b.q4_k_m.gguf"
+      ]),
+  LLMref(
+      name: "OpenChat-3.5-1210",
+      gguf_name: "openchat_openchat-3.5-1210",
+      size: 4368450656,
+      ctxlen: "8k",
+      sources: [
+        "https://huggingface.co/TheBloke/openchat-3.5-1210-GGUF/resolve/main/openchat-3.5-1210.Q4_K_M.gguf"
       ])
-  // Not ready yet
-  // LLMref(name: 'OpenChat-3.5-16K', size: 4368450304, sources: [
-  //   "https://huggingface.co/TheBloke/openchat_3.5-16k-GGUF/resolve/main/openchat_3.5-16k.Q4_K_M.gguf"
-  // ])
-  // Dolphin 2.2.1 Mistral 7B
-  // https://huggingface.co/TheBloke/dolphin-2.2.1-mistral-7B-GGUF/blob/main/dolphin-2.2.1-mistral-7b.Q4_K_M.gguf
-
-  /*
-  https://huggingface.co/afrideva/TinyLlama-1.1B-Chat-v0.6-GGUF
-  # <|system|>
-  # You are a friendly chatbot who always responds in the style of a pirate.</s>
-  # <|user|>
-  # How many helicopters can a human eat in one sitting?</s>
-  # <|assistant|>
-  # ...
-   */
 ];
 
-Map<String, Map<String, String>> known_prompt_formats = {};
+Map<String, LLMPromptFormat> known_prompt_formats = {};
 
-LLMPromptFormat resolve_prompt_format(String modelpath) {
+LLMPromptFormat resolve_prompt_format(String modelpath,
+    {builtin_chat_template_priority = true}) {
   var name = Path.basename(modelpath);
+
+  var meta = parseGGUFsync(modelpath);
+
+  print("GGUF metadata from $modelpath:\n${shorten_gguf_metadata(meta)}");
+
+  String? builtin_available;
+
+  if (meta != null) {
+    if (meta.containsKey("tokenizer.chat_template") &&
+        validate_jinja_chat_template(meta["tokenizer.chat_template"])) {
+      builtin_available = meta["tokenizer.chat_template"];
+      if (builtin_chat_template_priority && builtin_available is String) {
+        print(
+            "Using builtin jinja chat template from file $modelpath, template:\n$builtin_available");
+        return LLMPromptFormat.fromJinjaTemplate(
+            builtin_available, meta["general.name"]);
+      }
+    }
+  }
 
   var match = APPROVED_LLMS
       .indexWhere((element) => element.matchAgainstPath(modelpath));
@@ -135,7 +149,15 @@ LLMPromptFormat resolve_prompt_format(String modelpath) {
     }
   }
 
+  if (builtin_available is String) {
+    print(
+        "Using builtin jinja chat template from file $modelpath, template:\n$builtin_available");
+    return LLMPromptFormat.fromJinjaTemplate(
+        builtin_available, meta?["general.name"]);
+  }
+
   print("resolve_prompt_format @ $name: FALLBACK TO CHATML");
+
   return ChatMLPromptFormat;
 }
 
@@ -383,14 +405,16 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
   }
 }
 
-Widget widgetOrDefault(dynamic content, {TextStyle? defaultTextStyle}) {
+Widget widgetOrDefault(dynamic content, BuildContext context,
+    {TextStyle? defaultTextStyle}) {
   if (content is String) {
     return Text(content, style: defaultTextStyle);
   } else if (content is Widget) {
     return content;
-  } else {
-    return const Text('');
+  } else if (content is Function) {
+    return content(context);
   }
+  return const Text('');
 }
 
 Widget maybeExpanded({required Widget child, bool expanded = false}) {
@@ -399,6 +423,97 @@ Widget maybeExpanded({required Widget child, bool expanded = false}) {
   }
   return child;
 }
+
+// Widget buildRuntimeSettingsForm(
+//     BuildContext context, GlobalKey<FormBuilderState> formKey) {
+//   double screenWidth = MediaQuery.of(context).size.width;
+//   double screenHeight = MediaQuery.of(context).size.height;
+//
+//   var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+//   var bgColor2 = Colors.black;
+//   var formBgColor = Colors.grey.lighter(50); // getUserMsgColor(context);
+//   var formBgColorLighter = formBgColor.lighter(30);
+//   var lighterBgColor = Theme.of(context).colorScheme.secondary;
+//   var fgColor = Colors.black; // Theme.of(context).appBarTheme.foregroundColor!;
+//   var textColor = Theme.of(context).listTileTheme.textColor;
+//   var hintColor = Theme.of(context).hintColor;
+//
+//   final settings = ref.watch(settingsProvider);
+//
+//   return settings.when(
+//     data: (settings) {
+//       return Scaffold(
+//           drawer: _buildDrawer(context),
+//           appBar:
+//               AppBar(backgroundColor: bgColor, title: const Text("Settings")),
+//           body: Center(
+//               child: Container(
+//                   padding: const EdgeInsets.all(20.0),
+//                   decoration: BoxDecoration(
+//                       color: formBgColor,
+//                       borderRadius: BorderRadius.circular(8.0)),
+//                   constraints: BoxConstraints(
+//                     maxHeight: screenHeight,
+//                     maxWidth: isMobile()
+//                         ? screenWidth * 0.95
+//                         : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
+//                   ),
+//                   child: SingleChildScrollView(
+//                       child: FormBuilder(
+//                     key: _formKey,
+//                     initialValue: settings,
+//                     onChanged: () {
+//                       _formKey.currentState?.saveAndValidate();
+//                       var data = _formKey.currentState?.value ?? {};
+//                       final settingsNotifier =
+//                           ref.read(settingsProvider.notifier);
+//                       print("SAVE SETTINGS: $data");
+//                       settingsNotifier.updateSettings(data);
+//                     },
+//                     child: Column(
+//                       children: <Widget>[
+//                         FormBuilderDropdown<String>(
+//                             name: 'default_system_prompt',
+//                             items: [DropdownMenuItem(child: Text('Basic'))]),
+//                         Row(
+//                           children: [
+//                             Expanded(
+//                               child: FormBuilderDropdown<String>(
+//                                   name: 'default_system_prompt',
+//                                   items: [
+//                                     DropdownMenuItem(child: Text('Basic'))
+//                                   ]),
+//                             ),
+//                             IconButton(
+//                               icon: const Icon(Icons.add_box_outlined),
+//                               onPressed: () {
+//                                 print("ADD NEW PROMPT");
+//                               },
+//                               color: Colors.black,
+//                             )
+//                           ],
+//                         ),
+//                         FormBuilderTextField(
+//                             decoration: InputDecoration(
+//                               enabledBorder: OutlineInputBorder(
+//                                 borderSide: BorderSide(
+//                                     color: Colors.red,
+//                                     width: 3,
+//                                     style: BorderStyle.solid),
+//                               ),
+//                               hintText: 'Enter text',
+//                             ),
+//                             name: 'field1'),
+//                         FormBuilderTextField(name: 'field2'),
+//                         // Add more FormBuilderTextField widgets as needed
+//                       ],
+//                     ),
+//                   )))));
+//     },
+//     loading: () => CircularProgressIndicator(),
+//     error: (err, stack) => Text('Error: $err'),
+//   );
+// }
 
 Widget showOverlay(BuildContext context,
     {required dynamic title,
@@ -468,6 +583,7 @@ Widget showOverlay(BuildContext context,
                                 ],
                                 widgetOrDefault(
                                   title,
+                                  context,
                                   defaultTextStyle: const TextStyle(
                                       fontSize: 24,
                                       fontWeight: FontWeight.bold),
@@ -475,7 +591,9 @@ Widget showOverlay(BuildContext context,
                                 const SizedBox(height: 20),
                                 widgetOrDefault(
                                   content,
-                                  defaultTextStyle: TextStyle(fontSize: 18),
+                                  context,
+                                  defaultTextStyle:
+                                      const TextStyle(fontSize: 18),
                                 ),
                                 const SizedBox(height: 20),
                                 if (!no_controls)
@@ -3902,6 +4020,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   ui_show_model_runtime_settings_menu() {
     var modalHeaderColor = Colors.black;
     bool expanded = true;
+    var formKey = GlobalKey<FormBuilderState>();
+
     _showModal(
         title: Row(
             mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
@@ -3933,7 +4053,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         no_controls: true,
         backdrop_glass: true,
         padding: 12,
-        content: "test",
+        content: Text(''), // (BuildContext context) =>
+        // buildRuntimeSettingsForm(context, formKey),
         expanded: expanded);
   }
 
@@ -5826,8 +5947,10 @@ void main(List<String> args) async {
       value.forEach((key, value) {
         submap[key] = value.toString();
       });
-      known_prompt_formats[key] = submap;
+      known_prompt_formats[key] = LLMPromptFormat.fromTemplate(submap, key);
     });
+
+    //TODO: load user-defined prompt formats
   } catch (e) {
     print("Could not load default prompt formats: $e");
   }

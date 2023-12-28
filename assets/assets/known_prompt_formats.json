@@ -137,7 +137,13 @@
     "char": "Response",
     "user": "Input"
   },
-  "openChat": {
+  "openchat-1210": {
+    "template": "{{history}}{{char}}",
+    "historyTemplate": "GPT4 Correct {{user}}: {{message}}<|end_of_turn|>",
+    "char": "Assistant",
+    "user": "User"
+  },
+  "openchat": {
     "template": "{{history}}{{char}}",
     "historyTemplate": "GPT4 {{user}}: {{message}}<|end_of_turn|>",
     "char": "Assistant",

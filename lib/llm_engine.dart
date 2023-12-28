@@ -7,6 +7,7 @@ import 'package:path/path.dart' as Path;
 import 'package:ffi/ffi.dart';
 import 'dart:async';
 import 'package:crypto/crypto.dart';
+import 'package:jinja/jinja.dart';
 import 'util.dart';
 import 'llamarpc_generated_bindings.dart' as binding;
 
@@ -51,6 +52,44 @@ String extractSeparatorFromPromptTemplate(Map<String, dynamic> fmt,
     } else {
       return suffix + prefix.split("{{char}}").first + fmt['user'];
     }
+  }
+
+  print(
+      "Warning: cannot determine separator for template, falling back to $fallback");
+
+  return fallback;
+}
+
+var tagRE = RegExp(r'<\|\w+\|>');
+
+String extractSeparatorFromJinjaTemplate(String fmt,
+    {String fallback = "<\s>", special_token_heuristic = true}) {
+  var msgs = [
+    AIChatMessage("assistant", "n9213nsys_msg093485"),
+    AIChatMessage("user", "0239475user_msg43546"),
+  ];
+
+  String? ret;
+
+  var example = format_chat_jinja(fmt, msgs);
+
+  // TODO: minimize end-of-message suffix
+  var p0 = example.split(msgs[0].content);
+  var p1 = p0?[1].split(msgs[1].content);
+
+  if (p1 != null && p1.isNotEmpty) {
+    var sep = p1[0];
+    var match = tagRE.matchAsPrefix(sep);
+    if (match != null && match.group(0) != null) {
+      ret = match.group(0)!;
+    } else {
+      ret = sep;
+    }
+  }
+
+  if (ret != null) {
+    print("Heuristically derived separator:\n$ret");
+    return ret;
   }
 
   print(
@@ -129,11 +168,14 @@ class LLMPromptFormat {
   String separator;
   String Function(List<AIChatMessage>) formatter;
   String Function(String) fixer;
+  String? fromKnown;
+
   LLMPromptFormat(
       {this.name = "chatml",
       this.separator = "<|im_end|>",
       this.formatter = format_chatml,
-      this.fixer = fix_chatml_markup});
+      this.fixer = fix_chatml_markup,
+      this.fromKnown});
 
   factory LLMPromptFormat.fromTemplate(Map<String, dynamic> fmt, String? name) {
     if (!validatePromptFormatTemplate(fmt)) {
@@ -150,9 +192,73 @@ class LLMPromptFormat {
             formatConversation(format, history),
         fixer: create_fixer(separator));
   }
+
+  factory LLMPromptFormat.fromJinjaTemplate(String template, String? name) {
+    name = name ?? "fmt-${genUuidString()}";
+    var separator = extractSeparatorFromJinjaTemplate(template);
+    return LLMPromptFormat(
+        name: name,
+        separator: separator,
+        formatter: (List<AIChatMessage> history) =>
+            format_chat_jinja(template, history),
+        fixer: create_fixer(separator));
+  }
 }
 
 final ChatMLPromptFormat = LLMPromptFormat();
+
+// TODO: support general case
+String transform_tpl(String tpl) {
+  return tpl
+      .replaceAll(".title()", "|title")
+      .replaceAll(".upper()", "|upper")
+      .replaceAll(".lower()", "|lower");
+}
+
+var chat_tpl_memoizer = Memoizer();
+
+String format_chat_jinja(String template, List<AIChatMessage> messages,
+    {bool add_generation_prompt = true,
+    String bos_token = '',
+    String eos_token = '',
+    String? prompt}) {
+  var env = Environment();
+
+  Template t =
+      env.fromString(chat_tpl_memoizer.memoize(transform_tpl, template));
+
+  Map<String, Object?> values = {
+    'messages': messages.map((m) => ({"role": m.role, "content": m.content})),
+    'bos_token': bos_token,
+    'eos_token': eos_token, // specify your EOS token
+    'add_generation_prompt': add_generation_prompt,
+    'prompt': prompt ?? ''
+  };
+
+  return t.render(values);
+}
+
+bool validate_jinja_chat_template(String tpl) {
+  bool success = false;
+  var msgs = [
+    AIChatMessage("system", "sys_msg"),
+    AIChatMessage("user", "user_msg"),
+  ];
+
+  try {
+    var ret = format_chat_jinja(tpl, msgs);
+    success = true;
+    // prompt format should show all msgs content
+    for (var m in msgs) {
+      success = success && ret.contains(m.content);
+    }
+  } catch (e) {
+    print("Chat template validation exception: $e");
+    success = false;
+  }
+
+  return success;
+}
 
 class LLMChatCompletion {
   String prompt = "";

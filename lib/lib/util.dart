@@ -3,7 +3,7 @@
 // import 'dart:async';
 import 'dart:io';
 import 'dart:collection';
-import 'dart:ui';
+// import 'dart:ui';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -281,3 +281,28 @@ String genUuidString({int length = 16}) {
       .join('')
       .toUpperCase();
 }
+
+class Memoizer {
+  final Map<String, String> _cache = {};
+
+  String memoize(String Function(String) func, String input) {
+    if (_cache.containsKey(input)) {
+      return _cache[input]!;
+    } else {
+      var result = func(input);
+      _cache[input] = result;
+      return result;
+    }
+  }
+}
+
+dynamic replaceArraysWithPlaceholder(dynamic value) {
+  if (value is List) {
+    return 'array of length ${value.length}';
+  }
+  return value;
+}
+
+dynamic shorten_gguf_metadata(Map<String, dynamic>? metadata) => (metadata ??
+        {})
+    .map((key, value) => MapEntry(key, replaceArraysWithPlaceholder(value)));

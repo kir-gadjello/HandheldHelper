@@ -55,7 +55,6 @@ dependencies:
   flutter_downloader: ^1.11.4
   dio: ^5.3.3
   permission_handler: ^11.0.1
-  flutter_fast_forms: ^13.0.0
   getwidget: ^4.0.0
   external_path: ^1.0.3
   flutter_color: ^2.1.0
@@ -72,6 +71,8 @@ dependencies:
   riverpod_annotation: ^2.3.3
   webview_flutter: ^4.4.2
   flutter_form_builder: ^9.1.1
+  jinja: ^0.5.0
+  flutter_fast_forms: ^13.0.0
 
 dev_dependencies:
   ffigen: ^10.0.0
