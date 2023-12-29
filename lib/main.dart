@@ -61,7 +61,9 @@ const actionIconSize = 38.0;
 const actionIconPadding = EdgeInsets.symmetric(vertical: 0.0, horizontal: 2.0);
 const SEND_SHIFT_ENTER = true;
 const DEFAULT_CTXLEN = 2048;
-final MAX_CTXLEN = int.parse(Platform.environment?["MAXCTX"] ?? "8192");
+final MAX_CTXLEN = parse_numeric_shorthand(
+        Platform.environment?["MAXCTX"] ?? (isMobile() ? "8k" : "16k")) ??
+    8192;
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
@@ -106,6 +108,14 @@ final APPROVED_LLMS = [
       ctxlen: "8k",
       sources: [
         "https://huggingface.co/TheBloke/openchat-3.5-1210-GGUF/resolve/main/openchat-3.5-1210.Q4_K_M.gguf"
+      ]),
+  LLMref(
+      name: "Dolphin-2.6-mistral-7B",
+      gguf_name: "cognitivecomputations_dolphin-2.6-mistral-7b",
+      size: 4369381088,
+      ctxlen: "16k",
+      sources: [
+        "https://huggingface.co/TheBloke/dolphin-2.6-mistral-7B-GGUF/resolve/main/dolphin-2.6-mistral-7b.Q4_K_M.gguf"
       ])
 ];
 
