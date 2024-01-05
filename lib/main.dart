@@ -434,96 +434,107 @@ Widget maybeExpanded({required Widget child, bool expanded = false}) {
   return child;
 }
 
-// Widget buildRuntimeSettingsForm(
-//     BuildContext context, GlobalKey<FormBuilderState> formKey) {
-//   double screenWidth = MediaQuery.of(context).size.width;
-//   double screenHeight = MediaQuery.of(context).size.height;
-//
-//   var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
-//   var bgColor2 = Colors.black;
-//   var formBgColor = Colors.grey.lighter(50); // getUserMsgColor(context);
-//   var formBgColorLighter = formBgColor.lighter(30);
-//   var lighterBgColor = Theme.of(context).colorScheme.secondary;
-//   var fgColor = Colors.black; // Theme.of(context).appBarTheme.foregroundColor!;
-//   var textColor = Theme.of(context).listTileTheme.textColor;
-//   var hintColor = Theme.of(context).hintColor;
-//
-//   final settings = ref.watch(settingsProvider);
-//
-//   return settings.when(
-//     data: (settings) {
-//       return Scaffold(
-//           drawer: _buildDrawer(context),
-//           appBar:
-//               AppBar(backgroundColor: bgColor, title: const Text("Settings")),
-//           body: Center(
-//               child: Container(
-//                   padding: const EdgeInsets.all(20.0),
-//                   decoration: BoxDecoration(
-//                       color: formBgColor,
-//                       borderRadius: BorderRadius.circular(8.0)),
-//                   constraints: BoxConstraints(
-//                     maxHeight: screenHeight,
-//                     maxWidth: isMobile()
-//                         ? screenWidth * 0.95
-//                         : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
-//                   ),
-//                   child: SingleChildScrollView(
-//                       child: FormBuilder(
-//                     key: _formKey,
-//                     initialValue: settings,
-//                     onChanged: () {
-//                       _formKey.currentState?.saveAndValidate();
-//                       var data = _formKey.currentState?.value ?? {};
-//                       final settingsNotifier =
-//                           ref.read(settingsProvider.notifier);
-//                       print("SAVE SETTINGS: $data");
-//                       settingsNotifier.updateSettings(data);
-//                     },
-//                     child: Column(
-//                       children: <Widget>[
-//                         FormBuilderDropdown<String>(
-//                             name: 'default_system_prompt',
-//                             items: [DropdownMenuItem(child: Text('Basic'))]),
-//                         Row(
-//                           children: [
-//                             Expanded(
-//                               child: FormBuilderDropdown<String>(
-//                                   name: 'default_system_prompt',
-//                                   items: [
-//                                     DropdownMenuItem(child: Text('Basic'))
-//                                   ]),
-//                             ),
-//                             IconButton(
-//                               icon: const Icon(Icons.add_box_outlined),
-//                               onPressed: () {
-//                                 print("ADD NEW PROMPT");
-//                               },
-//                               color: Colors.black,
-//                             )
-//                           ],
-//                         ),
-//                         FormBuilderTextField(
-//                             decoration: InputDecoration(
-//                               enabledBorder: OutlineInputBorder(
-//                                 borderSide: BorderSide(
-//                                     color: Colors.red,
-//                                     width: 3,
-//                                     style: BorderStyle.solid),
-//                               ),
-//                               hintText: 'Enter text',
-//                             ),
-//                             name: 'field1'),
-//                         FormBuilderTextField(name: 'field2'),
-//                         // Add more FormBuilderTextField widgets as needed
-//                       ],
-//                     ),
-//                   )))));
-//     },
-//     loading: () => CircularProgressIndicator(),
-//     error: (err, stack) => Text('Error: $err'),
-//   );
-// }
+class RuntimeSettingsPage extends ConsumerStatefulWidget {
+  @override
+  _RuntimeSettingsPageState createState() => _RuntimeSettingsPageState();
+}
+
+class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
+  final _formKey = GlobalKey<FormBuilderState>();
+
+  @override
+  Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    double screenHeight = MediaQuery.of(context).size.height;
+
+    var bgColor = Theme.of(context).appBarTheme.backgroundColor!;
+    var bgColor2 = Colors.black;
+    var formBgColor = Colors.grey.lighter(50); // getUserMsgColor(context);
+    var formBgColorLighter = formBgColor.lighter(30);
+    var lighterBgColor = Theme.of(context).colorScheme.secondary;
+    var fgColor =
+        Colors.black; // Theme.of(context).appBarTheme.foregroundColor!;
+    var textColor = Theme.of(context).listTileTheme.textColor;
+    var hintColor = Theme.of(context).hintColor;
+
+    final settingsProvider = runtimeSettingsProvider;
+
+    final settings = ref.watch(settingsProvider);
+
+    return settings.when(
+      data: (settings) {
+        return Container(
+            padding: const EdgeInsets.all(20.0),
+            decoration: BoxDecoration(
+                color: formBgColor, borderRadius: BorderRadius.circular(8.0)),
+            constraints: BoxConstraints(
+              maxHeight: screenHeight,
+              maxWidth: isMobile()
+                  ? screenWidth * 0.95
+                  : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
+            ),
+            child: SingleChildScrollView(
+                child: FormBuilder(
+              key: _formKey,
+              initialValue: settings,
+              onChanged: () {
+                _formKey.currentState?.saveAndValidate();
+                var data = _formKey.currentState?.value ?? {};
+                final settingsNotifier = ref.read(settingsProvider.notifier);
+                print("SAVE SETTINGS: $data");
+                settingsNotifier.updateSettings(data);
+              },
+              child: Column(
+                children: <Widget>[
+                  FormBuilderDropdown<String>(
+                      name: 'default_system_prompt',
+                      items: [DropdownMenuItem(child: Text('Basic'))]),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FormBuilderDropdown<String>(
+                            name: 'default_system_prompt',
+                            items: [DropdownMenuItem(child: Text('Basic'))]),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_box_outlined),
+                        onPressed: () {
+                          print("ADD NEW PROMPT");
+                        },
+                        color: Colors.black,
+                      )
+                    ],
+                  ),
+                  FormBuilderTextField(
+                      decoration: InputDecoration(
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(
+                              color: Colors.red,
+                              width: 3,
+                              style: BorderStyle.solid),
+                        ),
+                        hintText: 'Enter text',
+                      ),
+                      name: 'field1'),
+                  FormBuilderTextField(name: 'field2'),
+                  // Add more FormBuilderTextField widgets as needed
+                ],
+              ),
+            )));
+      },
+      loading: () => CircularProgressIndicator(),
+      error: (err, stack) => Text('Error: $err'),
+    );
+  }
+}
+
+Widget buildRuntimeSettingsForm(BuildContext context) {
+  return Builder(
+    builder: (BuildContext innerContext) {
+      return RuntimeSettingsPage();
+    },
+  );
+}
 
 Widget showOverlay(BuildContext context,
     {required dynamic title,
@@ -4063,8 +4074,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         no_controls: true,
         backdrop_glass: true,
         padding: 12,
-        content: Text(''), // (BuildContext context) =>
-        // buildRuntimeSettingsForm(context, formKey),
+        content: (context) => buildRuntimeSettingsForm(context),
         expanded: expanded);
   }
 
@@ -5321,6 +5331,9 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
 
 class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   final MetadataManager _metadataManager = MetadataManager();
+  final String dbkey;
+
+  SettingsNotifier({required this.dbkey});
 
   @override
   FutureOr<Map<String, dynamic>> build() async {
@@ -5336,7 +5349,7 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   }
 
   Future<void> persist(Map<String, dynamic> settings) async {
-    await _metadataManager.setMetadata("_app_settings", settings);
+    await _metadataManager.setMetadata(dbkey, settings);
   }
 
   Future<void> restore() async {
@@ -5346,10 +5359,9 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   }
 
   Future<Map<String, dynamic>> restoreSettings() async {
-    var ret =
-        await _metadataManager.getMetadata("_app_settings", defaultValue: {});
+    var ret = await _metadataManager.getMetadata(dbkey, defaultValue: {});
     if (ret is Map) {
-      print("RESTORE SETTINGS: $ret");
+      print("RESTORE <SETTINGS:$dbkey>: $ret");
       return Map<String, dynamic>.from(ret);
     }
     return {};
@@ -5358,7 +5370,11 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
 
 final settingsProvider =
     AsyncNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
-        () => SettingsNotifier());
+        () => SettingsNotifier(dbkey: "_app_settings"));
+
+final runtimeSettingsProvider =
+    AsyncNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
+        () => SettingsNotifier(dbkey: "_runtime_app_settings"));
 
 class SettingsPage extends ConsumerStatefulWidget {
   @override

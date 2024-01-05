@@ -27,7 +27,7 @@ void main() async {
   var d = LLMEngine(
       libpath: "./native/librpcserver.dylib",
       modelpath: Platform.environment["MODELPATH"] ??
-          "/Users/LKE/projects/AI/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf",
+          "../tinyllama-1.1b-1t-openorca.Q4_K_M.gguf",
       llama_init_json: resolve_init_json());
 
   d.msgs = [

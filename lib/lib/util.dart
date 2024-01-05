@@ -8,6 +8,7 @@ import 'dart:math';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
+import 'package:crypto/crypto.dart';
 
 bool isMobile() => Platform.isAndroid;
 bool isDevelopment() =>
@@ -306,3 +307,39 @@ dynamic replaceArraysWithPlaceholder(dynamic value) {
 dynamic shorten_gguf_metadata(Map<String, dynamic>? metadata) => (metadata ??
         {})
     .map((key, value) => MapEntry(key, replaceArraysWithPlaceholder(value)));
+
+class MapHasher {
+  static List<List<dynamic>> sortKeys(Map<String, dynamic> map) {
+    var keys = map.keys.toList();
+    keys.sort((a, b) => a.compareTo(b));
+    return keys.map((key) {
+      var value = map[key]!;
+      if (value is Map<String, dynamic>) {
+        return [key, sortKeys(value)];
+      }
+      return [key, value];
+    }).toList();
+  }
+
+  static String hash(Map<String, dynamic> map) {
+    var sortedMap = sortKeys(map);
+    String? jsonStr;
+    try {
+      jsonStr = jsonEncode(sortedMap);
+    } catch (e) {
+      print("Exception in MapHasher: $e");
+      var keys = map.entries.toList();
+      keys.sort((a, b) => a.key.compareTo(b.key));
+      jsonStr = keys.map((kv) {
+        String value = kv.value.toString();
+        try {
+          value = jsonEncode(kv.value);
+        } catch (e) {}
+        return "(${kv.key}:$value)";
+      }).join(",");
+    }
+    var bytes = utf8.encode(jsonStr);
+    var digest = sha256.convert(bytes);
+    return base64Url.encode(digest.bytes);
+  }
+}
