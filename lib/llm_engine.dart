@@ -3,6 +3,7 @@ import 'dart:ffi' as ffi;
 import 'dart:io' show File, Directory, Platform, FileSystemEntity;
 // import 'dart:ui';
 // import 'package:handheld_helper/gguf.dart';
+import 'package:handheld_helper/gguf.dart';
 import 'package:path/path.dart' as Path;
 import 'package:ffi/ffi.dart';
 import 'dart:async';
@@ -13,7 +14,7 @@ import 'llamarpc_generated_bindings.dart' as binding;
 
 const kDebugMode = true;
 const LLAMA_SO = "librpcserver";
-const bool __DEBUG = false;
+const bool __DEBUG = true;
 
 const _IM_END_ = ["<|im_end|>"];
 
@@ -545,6 +546,8 @@ class LLMEngine {
   int tokens_used = 0;
   int n_ctx = 0;
   late LLMPromptFormat prompt_format;
+  String? model_hash;
+  String? mhash;
 
   LLMEngineState state = LLMEngineState.NOT_INITIALIZED;
 
@@ -566,6 +569,7 @@ class LLMEngine {
     onInitDone = null;
     tokens_used = 0;
     n_ctx = 0;
+    model_hash = null;
   }
 
   late binding.LLamaRPC rpc;
@@ -643,6 +647,7 @@ class LLMEngine {
     if (sysinfo['init_success'] == 1) {
       initialized = true;
       state = LLMEngineState.INITIALIZED_SUCCESS;
+      model_hash = mhash;
     } else if (sysinfo['init_success'] == -1) {
       initialized = false;
       state = LLMEngineState.INITIALIZED_FAILURE;
@@ -729,6 +734,23 @@ class LLMEngine {
       //   init_json['n_ctx'] = 8192;
       // }
 
+      if (File(modelpath).existsSync()) {
+        try {
+          var gguf_dict = parseGGUFsync(modelpath)!;
+          mhash = MapHasher.hash(
+              gguf_dict); // TODO: make some signature hash of the model params to catch finetunes
+        } catch (e) {
+          print("Exception while parsing GGUF header for $modelpath: $e");
+          mhash = MapHasher.hash({
+            "model_path": modelpath,
+            "model_size:": File(modelpath).lengthSync()
+          });
+        }
+      } else {
+        state = LLMEngineState.INITIALIZED_FAILURE;
+        return false;
+      }
+
       if (non_blocking) {
         n_ctx = init_json['n_ctx'] ?? 2048;
 
@@ -744,8 +766,9 @@ class LLMEngine {
           if (initialized) {
             init_in_progress = false;
             state = LLMEngineState.INITIALIZED_SUCCESS;
+            model_hash = mhash;
             print("Init complete at ${DateTime.now()}");
-            print("[OK] Loaded model... $modelpath");
+            print("[OK] Loaded model... $modelpath:$model_hash");
             timer.cancel();
             if (onInitDone != null) {
               onInitDone(true);
@@ -768,8 +791,9 @@ class LLMEngine {
         init_in_progress = false;
         if (initialized) {
           state = LLMEngineState.INITIALIZED_SUCCESS;
+          model_hash = mhash;
         }
-        print("INITIALIZED: $initialized");
+        print("INITIALIZED: $initialized, $modelpath:$model_hash");
         if (onInitDone != null) {
           onInitDone(initialized);
         }

@@ -17,12 +17,6 @@
     "char": "ASSISTANT",
     "user": "USER"
   },
-  "chatml": {
-    "template": "<|im_start|>system\\n{{prompt}}<|im_end|>\\n{{history}}\\n<|im_start|>{{char}}",
-    "historyTemplate": "<|im_start|>{{user}}\\n{{message}}<|im_end|>",
-    "char": "assistant",
-    "user": "user"
-  },
   "codeCherryPop": {
     "template": "{{prompt}}\\n\\n{{history}}\\n\\n### {{char}}:",
     "historyTemplate": "### {{name}}:\\n{{message}}",

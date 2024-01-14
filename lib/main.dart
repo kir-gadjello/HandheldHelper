@@ -64,6 +64,22 @@ const DEFAULT_CTXLEN = 2048;
 final MAX_CTXLEN = parse_numeric_shorthand(
         Platform.environment?["MAXCTX"] ?? (isMobile() ? "8k" : "16k")) ??
     8192;
+const PROMPT_FORMAT_TPL_EXAMPLE = '''{"chatml":
+  {
+    "template": "<|im_start|>system\\n{{prompt}}<|im_end|>\\n{{history}}\\n<|im_start|>{{char}}",
+    "historyTemplate": "<|im_start|>{{user}}\\n{{message}}<|im_end|>",
+    "char": "assistant",
+    "user": "user"
+  }
+}
+''';
+const codeSpanStyle = TextStyle(
+  fontFamily: 'JetBrainsMono',
+  fontSize: 14,
+  height: 1.5,
+  decoration: TextDecoration.none,
+  fontWeight: FontWeight.w300,
+);
 
 final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
@@ -119,24 +135,57 @@ final APPROVED_LLMS = [
       ])
 ];
 
-Map<String, LLMPromptFormat> known_prompt_formats = {};
+Map<String, LLMPromptFormat> known_prompt_formats = {
+  "chatml": ChatMLPromptFormat,
+  "minichat": MiniChatPromptFormat
+};
 
 LLMPromptFormat resolve_prompt_format(String modelpath,
-    {builtin_chat_template_priority = true}) {
+    {builtin_chat_template_priority = true,
+    Map<String, Map<String, dynamic>> user_runtime_settings = const {}}) {
   var name = Path.basename(modelpath);
 
   var meta = parseGGUFsync(modelpath);
+  String model_hash = "";
 
-  print("GGUF metadata from $modelpath:\n${shorten_gguf_metadata(meta)}");
+  dlog("GGUF metadata from $modelpath:\n${shorten_gguf_metadata(meta)}");
 
   String? builtin_available;
 
+  // TODO: toggle force correct prompt format for known models (openhermes etc)
+
   if (meta != null) {
+    model_hash = MapHasher.hash(meta);
+
+    dlog(
+        "Loading user runtime settings for model $model_hash ...\n$user_runtime_settings");
+
+    if (user_runtime_settings.containsKey(model_hash)) {
+      try {
+        Map<String, dynamic> model_settings =
+            user_runtime_settings[model_hash] ?? {};
+        if (model_settings.containsKey("prompt_format")) {
+          // TODO: custom user-defined prompt formats
+          if (known_prompt_formats
+              .containsKey(model_settings["prompt_format"])) {
+            var ret = known_prompt_formats[model_settings["prompt_format"]]!;
+            dlog(
+                "LOADED CUSTOM PROMPT FORMAT FROM SAVED USER SETTINGS: ${model_settings["prompt_format"]}");
+            return ret;
+          }
+        }
+      } catch (e) {
+        dlog(e);
+      }
+    }
+
+    // TODO toggle force respecting model's chat template in the settings
+
     if (meta.containsKey("tokenizer.chat_template") &&
         validate_jinja_chat_template(meta["tokenizer.chat_template"])) {
       builtin_available = meta["tokenizer.chat_template"];
       if (builtin_chat_template_priority && builtin_available is String) {
-        print(
+        dlog(
             "Using builtin jinja chat template from file $modelpath, template:\n$builtin_available");
         return LLMPromptFormat.fromJinjaTemplate(
             builtin_available, meta["general.name"]);
@@ -152,7 +201,7 @@ LLMPromptFormat resolve_prompt_format(String modelpath,
     var f = File(modelpath);
     if (f.existsSync()) {
       if (f.lengthSync() == llmref.size) {
-        print(
+        dlog(
             "resolve_prompt_format @ $name: MATCH TO ${llmref.name}=(${llmref.prompt_format.name})");
         return llmref.prompt_format;
       }
@@ -160,13 +209,13 @@ LLMPromptFormat resolve_prompt_format(String modelpath,
   }
 
   if (builtin_available is String) {
-    print(
+    dlog(
         "Using builtin jinja chat template from file $modelpath, template:\n$builtin_available");
     return LLMPromptFormat.fromJinjaTemplate(
         builtin_available, meta?["general.name"]);
   }
 
-  print("resolve_prompt_format @ $name: FALLBACK TO CHATML");
+  dlog("resolve_prompt_format @ $name: FALLBACK TO CHATML");
 
   return ChatMLPromptFormat;
 }
@@ -232,7 +281,7 @@ Future<SystemInfo?> getSysInfo() async {
       freeDisk = (await DesktopDiskSpace.instance.getFreeSpace() ?? -1) * 1.0;
     }
   } catch (e) {
-    print("Exception in getSysInfo: $e");
+    dlog("Exception in getSysInfo: $e");
   }
   if (RAM != null && freeDisk != null && totalDisk != null) {
     return SystemInfo(RAM!, freeDisk!, totalDisk!);
@@ -250,7 +299,7 @@ void launchURL(String url) async {
 Future<bool> requestStoragePermission() async {
   var status = await Permission.storage.request();
   if (status.isGranted) {
-    print('Storage permission granted');
+    dlog('Storage permission granted');
     return true;
   } else if (status.isPermanentlyDenied) {
     openAppSettings();
@@ -294,7 +343,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
 
   @override
   void initState() {
-    print("SelfCalibratingProgressBar: initState");
+    dlog("SelfCalibratingProgressBar: initState");
     super.initState();
     progressSpeed = restoreSpEst(); // todo
     previousTimestamp = DateTime.now();
@@ -334,7 +383,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
   }
 
   void calibrateProgressSpeed() {
-    print("calibrateProgressSpeed(): $previousProgress -> ${widget.progress}");
+    dlog("calibrateProgressSpeed(): $previousProgress -> ${widget.progress}");
 
     DateTime currentTimestamp = DateTime.now();
     double timeDifference =
@@ -350,7 +399,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
           (widget.progress - previousProgress) /
           timeDifference;
       persistSpEst(progressSpeed!);
-      print("PROGRESS SPEED: ${(progressSpeed! * 1000.0).round()}T/s");
+      dlog("PROGRESS SPEED: ${(progressSpeed! * 1000.0).round()}T/s");
     }
 
     previousTimestamp = currentTimestamp;
@@ -374,7 +423,7 @@ class _SelfCalibratingProgressBarState extends State<SelfCalibratingProgressBar>
                 .round());
 
     if (_controller == null) {
-      print(
+      dlog(
           "CREATE ANIMATION CONTROLLER, widget.progress=${widget.progress} DURATION=${duration.inMilliseconds}ms");
       _controller = AnimationController(
         value: widget.progress,
@@ -434,6 +483,41 @@ Widget maybeExpanded({required Widget child, bool expanded = false}) {
   return child;
 }
 
+(List<DropdownMenuItem<String>>, String?) buildPromptFormatMenu(
+    AsyncValue<Map<String, dynamic>> custom) {
+  var basePfs = known_prompt_formats.keys.toList();
+
+  if (custom.hasValue) {
+    basePfs.addAll(custom.value!.keys); // TODO
+  }
+
+  var ret = List<DropdownMenuItem<String>>.from(
+      basePfs.map((k) => DropdownMenuItem<String>(value: k, child: Text(k))));
+
+  return (ret, 'chatml');
+}
+
+Widget formField(String name, Widget field,
+    {bool uppercase = true,
+    bool border = true,
+    bool padding = true,
+    Widget? leading,
+    Widget? trailing}) {
+  return Container(
+      padding: padding ? const EdgeInsets.all(8.0) : null,
+      decoration: border
+          ? BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8.0))
+          : null,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (leading != null) leading,
+        Text(uppercase ? name.toUpperCase() : name),
+        field,
+        if (trailing != null) trailing
+      ]));
+}
+
 class RuntimeSettingsPage extends ConsumerStatefulWidget {
   @override
   _RuntimeSettingsPageState createState() => _RuntimeSettingsPageState();
@@ -441,6 +525,7 @@ class RuntimeSettingsPage extends ConsumerStatefulWidget {
 
 class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
   final _formKey = GlobalKey<FormBuilderState>();
+  bool promptFormatEditShown = false;
 
   @override
   Widget build(BuildContext context) {
@@ -458,15 +543,24 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
     var hintColor = Theme.of(context).hintColor;
 
     final settingsProvider = runtimeSettingsProvider;
+    final runtimeSettings = ref.watch(settingsProvider);
+    final customPromptFormats = ref.watch(customPromptFormatsProvider);
 
-    final settings = ref.watch(settingsProvider);
+    var (promptFormats, defaultPromptFormat) =
+        buildPromptFormatMenu(customPromptFormats);
 
-    return settings.when(
+    return runtimeSettings.when(
       data: (settings) {
+        var model_hash = llm.model_hash ?? "__undefined_model__";
+        var settings_for_model = (settings[model_hash] ?? {});
+
+        dlog("SETTINGS: $settings\n SETTINGS FOR MODEL: $settings_for_model");
+
         return Container(
             padding: const EdgeInsets.all(20.0),
             decoration: BoxDecoration(
                 color: formBgColor, borderRadius: BorderRadius.circular(8.0)),
+            // clipBehavior: Clip.antiAlias,
             constraints: BoxConstraints(
               maxHeight: screenHeight,
               maxWidth: isMobile()
@@ -476,47 +570,99 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
             child: SingleChildScrollView(
                 child: FormBuilder(
               key: _formKey,
-              initialValue: settings,
+              initialValue: settings_for_model,
               onChanged: () {
                 _formKey.currentState?.saveAndValidate();
                 var data = _formKey.currentState?.value ?? {};
                 final settingsNotifier = ref.read(settingsProvider.notifier);
-                print("SAVE SETTINGS: $data");
-                settingsNotifier.updateSettings(data);
+                dlog("SAVE SETTINGS: $data FOR MODEL_HASH: ${model_hash}");
+                settingsNotifier.commit({model_hash: data}, patch: true);
               },
               child: Column(
                 children: <Widget>[
-                  FormBuilderDropdown<String>(
-                      name: 'default_system_prompt',
-                      items: [DropdownMenuItem(child: Text('Basic'))]),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FormBuilderDropdown<String>(
-                            name: 'default_system_prompt',
-                            items: [DropdownMenuItem(child: Text('Basic'))]),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_box_outlined),
-                        onPressed: () {
-                          print("ADD NEW PROMPT");
-                        },
-                        color: Colors.black,
-                      )
-                    ],
-                  ),
-                  FormBuilderTextField(
-                      decoration: InputDecoration(
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(
-                              color: Colors.red,
-                              width: 3,
-                              style: BorderStyle.solid),
-                        ),
-                        hintText: 'Enter text',
-                      ),
-                      name: 'field1'),
-                  FormBuilderTextField(name: 'field2'),
+                  formField(
+                      "prompt format",
+                      Row(children: [
+                        Expanded(
+                            child: FormBuilderDropdown<String>(
+                                name: 'prompt_format',
+                                initialValue:
+                                    settings_for_model["prompt_format"] ??
+                                        defaultPromptFormat,
+                                items: promptFormats,
+                                dropdownColor: formBgColor)),
+                        IconButton(
+                          icon: const Icon(Icons.edit_note),
+                          onPressed: () {
+                            dlog("ADD NEW PROMPT FORMAT");
+                            setState(() {
+                              promptFormatEditShown = !promptFormatEditShown;
+                            });
+                          },
+                          color: Colors.black,
+                        )
+                      ]),
+                      trailing: promptFormatEditShown
+                          ? Column(children: [
+                              const SizedBox(height: 10),
+                              formField(
+                                  "ADD NEW PROMPT FORMAT",
+                                  Row(children: [
+                                    Expanded(
+                                        child: FormBuilderTextField(
+                                            name: '_new_prompt_format',
+                                            initialValue: "",
+                                            style: codeSpanStyle,
+                                            decoration: InputDecoration(
+                                              hintText:
+                                                  PROMPT_FORMAT_TPL_EXAMPLE,
+                                              hintStyle:
+                                                  TextStyle(color: hintColor),
+                                            ),
+                                            maxLines: PROMPT_FORMAT_TPL_EXAMPLE
+                                                .split('\n')
+                                                .length)),
+                                    IconButton(
+                                      icon: const Icon(Icons.add),
+                                      onPressed: () {
+                                        dlog("SAVE NEW PROMPT FORMAT");
+                                        setState(() {
+                                          promptFormatEditShown = false;
+                                        });
+                                      },
+                                      color: Colors.black,
+                                    )
+                                  ]))
+                            ])
+                          : null),
+                  // Row(
+                  //   children: [
+                  //     Expanded(
+                  //       child: FormBuilderDropdown<String>(
+                  //           name: 'default_system_prompt',
+                  //           items: [DropdownMenuItem(child: Text('Basic'))]),
+                  //     ),
+                  //     IconButton(
+                  //       icon: const Icon(Icons.add_box_outlined),
+                  //       onPressed: () {
+                  //         dlog("ADD NEW PROMPT FORMAT");
+                  //       },
+                  //       color: Colors.black,
+                  //     )
+                  //   ],
+                  // ),
+                  // FormBuilderTextField(
+                  //     decoration: InputDecoration(
+                  //       enabledBorder: OutlineInputBorder(
+                  //         borderSide: BorderSide(
+                  //             color: Colors.red,
+                  //             width: 3,
+                  //             style: BorderStyle.solid),
+                  //       ),
+                  //       hintText: 'Enter text',
+                  //     ),
+                  //     name: 'field1'),
+                  // FormBuilderTextField(name: 'field2'),
                   // Add more FormBuilderTextField widgets as needed
                 ],
               ),
@@ -551,7 +697,7 @@ Widget showOverlay(BuildContext context,
   //     onKey: (RawKeyEvent event) {
   //       if (event is RawKeyDownEvent &&
   //           event.logicalKey == LogicalKeyboardKey.escape) {
-  //         print("MODAL: ESC KEY PRESSED");
+  //         dlog("MODAL: ESC KEY PRESSED");
   //         if (onClose != null) {
   //           onClose();
   //         }
@@ -560,7 +706,7 @@ Widget showOverlay(BuildContext context,
   //     child:
   return GestureDetector(
       onTap: () {
-        print("MODAL: OUTER CLICK CLOSE");
+        dlog("MODAL: OUTER CLICK CLOSE");
         if (onClose != null) {
           onClose();
         }
@@ -710,12 +856,12 @@ class _BackgroundDownloadWidgetState extends State<BackgroundDownloadWidget> {
         });
       }, onStatus: (status) async {
         if (status == TaskStatus.complete) {
-          print(
+          dlog(
               "DL complete! Moving file from $tempDlPath to ${widget.destinationPath}");
           try {
             await moveFile(File(tempDlPath!), widget.destinationPath);
           } catch (e) {
-            print("Error! could not move file... $e");
+            dlog("Error! could not move file... $e");
           }
           setState(() {
             isDownloading = false;
@@ -738,10 +884,9 @@ class _BackgroundDownloadWidgetState extends State<BackgroundDownloadWidget> {
 
       FileDownloader().updates.listen((update) {
         if (update is TaskStatusUpdate) {
-          print(
-              'Status update for ${update.task} with status ${update.status}');
+          dlog('Status update for ${update.task} with status ${update.status}');
         } else if (update is TaskProgressUpdate) {
-          print(
+          dlog(
               'Progress update for ${update.task} with progress ${update.progress}');
           setState(() {
             _downloadSpeed = update.networkSpeed;
@@ -980,7 +1125,7 @@ class LLMref {
       this.prompt_format = prompt_format;
     }
     native_ctxlen = parse_numeric_shorthand(ctxlen);
-    print("LLMREF ${this.name} ${this.prompt_format.name}");
+    dlog("LLMREF ${this.name} ${this.prompt_format.name}");
     if (fileName == null) {
       assert(sources.isNotEmpty);
       fileName = getFileName();
@@ -992,7 +1137,7 @@ String resolve_default_llm() {
   const defmod = String.fromEnvironment("DEFAULTMODEL", defaultValue: "");
 
   if (defmod.isNotEmpty) {
-    print("Overriding default model: $defmod");
+    dlog("Overriding default model: $defmod");
   } else {
     var ram_size = SysInfo.getTotalPhysicalMemory();
 
@@ -1000,7 +1145,7 @@ String resolve_default_llm() {
       // TODO: fine-grained fallback model sequence
       var llm = APPROVED_LLMS
           .firstWhere((llm) => llm.name.toLowerCase().contains("tinyllama"));
-      print(
+      dlog(
           "LOW RAM DEVICE: $ram_size bytes RAM AVAILABLE, OVERRIDING DEFAULT MODEL:\nTO:${llm.name}");
 
       return llm.name;
@@ -1055,11 +1200,11 @@ String resolve_llm_file(RootAppParams p, {String? model_file}) {
   const fcand = (String.fromEnvironment("MODELPATH") ?? "");
   final env_cand = (Platform.environment["MODELPATH"] ?? "");
   if (fcand.isNotEmpty && File(fcand).existsSync()) {
-    print("OVERRIDING LLM PATH TO $fcand");
+    dlog("OVERRIDING LLM PATH TO $fcand");
     ret = fcand;
   }
   if (env_cand.isNotEmpty && File(env_cand).existsSync()) {
-    print("OVERRIDING LLM PATH TO $env_cand");
+    dlog("OVERRIDING LLM PATH TO $env_cand");
     ret = env_cand;
   }
   return ret;
@@ -1076,7 +1221,7 @@ String? findFile(String filename, List<String> searchPaths,
     [bool Function(File)? validateFn]) {
   // Resolve symbolic links
 
-  print("FINDFILE: $filename in $searchPaths");
+  dlog("FINDFILE: $filename in $searchPaths");
 
   String? ret;
 
@@ -1085,7 +1230,7 @@ String? findFile(String filename, List<String> searchPaths,
     var initialPath = Path.join(dir, filename);
     var resolvedPath = attemptResolveSymlink(initialPath);
     if (initialPath != resolvedPath) {
-      print("FINDFILE: symlink $initialPath --> $resolvedPath");
+      dlog("FINDFILE: symlink $initialPath --> $resolvedPath");
     }
     if (File(resolvedPath).existsSync()) {
       // If a validation function is given, use it for validation
@@ -1102,7 +1247,7 @@ String? findFile(String filename, List<String> searchPaths,
   }
 
   if (ret != null) {
-    print("FINDFILE: found $filename in $ret");
+    dlog("FINDFILE: found $filename in $ret");
   }
 
   // If no valid file is found, return null
@@ -1111,13 +1256,13 @@ String? findFile(String filename, List<String> searchPaths,
 
 String? resolve_hhh_model(
     String filename, String hhh_dir, List<String>? model_search_paths) {
-  print("resolve_hhh_model $filename $hhh_dir $model_search_paths");
+  dlog("resolve_hhh_model $filename $hhh_dir $model_search_paths");
   return findFile(filename, [hhh_dir, ...(model_search_paths ?? [])]);
 }
 
 bool validate_root_app_params(Map<String, dynamic> j) {
   bool root_dir_ok = false, default_model_ok = false;
-  print("validate_root_app_params arg: $j");
+  dlog("validate_root_app_params arg: $j");
   String? hhh_dir, hhh_model_subdir;
   try {
     hhh_dir = j['hhh_dir'];
@@ -1125,9 +1270,9 @@ bool validate_root_app_params(Map<String, dynamic> j) {
     root_dir_ok = Directory(j['hhh_dir']).existsSync() &&
         Directory(hhh_model_subdir).existsSync();
   } catch (e) {
-    print("Exception: $e");
+    dlog("Exception: $e");
   }
-  print("$hhh_dir exists = $root_dir_ok");
+  dlog("$hhh_dir exists = $root_dir_ok");
 
   String? mpath;
   try {
@@ -1137,9 +1282,9 @@ bool validate_root_app_params(Map<String, dynamic> j) {
       default_model_ok = File(mpath).existsSync();
     }
   } catch (e) {
-    print("Exception: $e");
+    dlog("Exception: $e");
   }
-  print("$mpath exists = $default_model_ok");
+  dlog("$mpath exists = $default_model_ok");
   return root_dir_ok && default_model_ok;
 }
 
@@ -1156,7 +1301,7 @@ String? guess_user_home_dir() {
 }
 
 Future<AppInitParams> perform_app_init() async {
-  print("ENTER perform_app_init");
+  dlog("ENTER perform_app_init");
   String def_hhh_dir = (await getApplicationDocumentsDirectory()).absolute.path;
 
   if (Platform.isLinux) {
@@ -1168,7 +1313,7 @@ Future<AppInitParams> perform_app_init() async {
     //     .absolute
     //     .path; // Path.join(Platform.environment["HOME"] ?? "/home/user", "Documents/HHH");
   } else if (Platform.isAndroid) {
-    print("Running Android...");
+    dlog("Running Android...");
     Directory? sdcard = await getExternalStorageDirectory();
     List<Directory>? sdcard_dirs =
         await getExternalStorageDirectories(type: StorageDirectory.downloads);
@@ -1177,47 +1322,47 @@ Future<AppInitParams> perform_app_init() async {
     if (sdcard != null && sdcard.existsSync()) {
       try {
         String path = sdcard.absolute.path;
-        print("External storage directory: ${path}");
+        dlog("External storage directory: ${path}");
         def_hhh_dir = Path.join(path, "HHH");
       } catch (e) {
         try {
-          print("Exception, backing up... $e");
+          dlog("Exception, backing up... $e");
           Directory? sdcard = await getExternalStorageDirectory();
           if (sdcard != null) {
             String path = sdcard.absolute.path;
             def_hhh_dir = Path.join(path, "HHH");
           }
         } catch (e) {
-          print("Exception");
+          dlog("Exception");
         }
       }
     } else {
-      print("External storage directory = NULL");
+      dlog("External storage directory = NULL");
       var path = "/storage/emulated/0/";
-      print("WARNING: using default external storage dir: $path");
+      dlog("WARNING: using default external storage dir: $path");
       def_hhh_dir = Path.join(path, "HHH");
     }
   }
 
   var hhhd = HHHDefaults(def_hhh_dir, defaultLLM);
 
-  print("HHHDefaults: $hhhd");
+  dlog("HHHDefaults: $hhhd");
 
-  print("INIT db");
+  dlog("INIT db");
 
   final DatabaseHelper _databaseHelper = DatabaseHelper();
   var metadb = MetadataManager();
   var root_app_params = await metadb.getMetadata("root_app_params");
   RootAppParams? rp;
 
-  print("INIT validate_root_app_params");
+  dlog("INIT validate_root_app_params");
 
-  print("INIT root_app_params from db = $root_app_params");
+  dlog("INIT root_app_params from db = $root_app_params");
 
   if (root_app_params is String) {
     var jr_app_params = jsonDecode(root_app_params);
 
-    print("INIT json root_app_params from db = $jr_app_params");
+    dlog("INIT json root_app_params from db = $jr_app_params");
 
     if (validate_root_app_params(jr_app_params)) {
       rp = RootAppParams(
@@ -1227,7 +1372,7 @@ Future<AppInitParams> perform_app_init() async {
     }
   }
 
-  print("DONE perform_app_init");
+  dlog("DONE perform_app_init");
 
   if (Platform.isAndroid) {
     Map<Permission, PermissionStatus> statuses =
@@ -1238,10 +1383,10 @@ Future<AppInitParams> perform_app_init() async {
     for (var item in statuses.entries) {
       var granted = (item.value?.isGranted ?? false);
       if (granted) {
-        print("[OK] PERMISSION ${item.key} GRANTED");
+        dlog("[OK] PERMISSION ${item.key} GRANTED");
       }
       // else {
-      //   print("[ERROR] PERMISSION ${item.key} NOT GRANTED");
+      //   dlog("[ERROR] PERMISSION ${item.key} NOT GRANTED");
       // }
       perm_success &= granted;
     }
@@ -1336,7 +1481,7 @@ class _ActiveChatPageState extends State<ActiveChatPage> {
   }
 }
 
-class ActiveChatDialog extends StatefulWidget {
+class ActiveChatDialog extends ConsumerStatefulWidget {
   ActiveChatDialog(
       {Key? key,
       required this.title,
@@ -1349,7 +1494,7 @@ class ActiveChatDialog extends StatefulWidget {
   final AppInitParams appInitParams;
 
   @override
-  State<ActiveChatDialog> createState() => ActiveChatDialogState();
+  ConsumerState<ActiveChatDialog> createState() => ActiveChatDialogState();
 }
 
 const hermes_sysmsg =
@@ -1657,12 +1802,12 @@ Future<String?> getMobileUserDownloadPath() async {
           directory = await getExternalStorageDirectory();
         }
       } else {
-        print("Could not get MANAGE_EXTERNAL_STORAGE permission...");
+        dlog("Could not get MANAGE_EXTERNAL_STORAGE permission...");
         directory = await getDownloadsDirectory();
       }
     }
   } catch (err, stack) {
-    print("Cannot get download folder path");
+    dlog("Cannot get download folder path");
   }
   return directory?.path;
 }
@@ -1727,7 +1872,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
         _resolveSpecialDir(specialPath);
       } else {
         _path = _controller.text;
-        print("INITIAL PATH: $_path");
+        dlog("INITIAL PATH: $_path");
         Future.delayed(Duration(milliseconds: 20), () {
           _checkFileOrDirectoryExistsImpl(
               _path, isDirectoryPicker, execAdditionalFileCheck);
@@ -1738,11 +1883,11 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
 
   _resolveSpecialDir(String p) async {
     if (p == "__%DOWNLOADS") {
-      print("INITIALIZING DOWNLOADS DIR");
+      dlog("INITIALIZING DOWNLOADS DIR");
       String? downloads = await getMobileUserDownloadPath() ??
           (await getApplicationDocumentsDirectory()).path;
       if (downloads != null) {
-        print("DOWNLOADS DIR = $downloads");
+        dlog("DOWNLOADS DIR = $downloads");
         _path = downloads;
         _controller.text = _path;
         _checkFileOrDirectoryExistsImpl(
@@ -1838,9 +1983,9 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
 
     if (rootPath == null || !Directory(rootPath).existsSync()) {
       rootPath = (await getApplicationDocumentsDirectory()).absolute.path;
-      print("PICK PATH: DEFAULTING TO PATH $rootPath");
+      dlog("PICK PATH: DEFAULTING TO PATH $rootPath");
     }
-    debugPrint('Root path: $rootPath allowedExtensions=$allowedExtensions');
+    dlog('Root path: $rootPath allowedExtensions=$allowedExtensions');
 
     if (context.mounted) {
       String? path = await FilesystemPicker.open(
@@ -1871,7 +2016,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
     String? path;
     try {
       if (isMobile()) {
-        print("PICK PATH: $isDirectoryPicker $initialPath");
+        dlog("PICK PATH: $isDirectoryPicker $initialPath");
         path = await _pickPath(context,
             rootPath: initialPath,
             isDirectory: isDirectoryPicker,
@@ -1885,7 +2030,7 @@ class _CustomFilePickerState extends State<CustomFilePicker> {
         }
       }
     } catch (e) {
-      print(e);
+      dlog(e);
     } finally {
       setState(() {
         _isLoading = false;
@@ -2259,7 +2404,7 @@ class _AppSetupForm extends State<AppSetupForm> {
 
     if (try_downloads_dir) {
       // TODO
-      print("Attempting to find LLM file at user Downloads directory");
+      dlog("Attempting to find LLM file at user Downloads directory");
     }
 
     var warn = soft ? "CHECK" : "ERROR";
@@ -2268,20 +2413,20 @@ class _AppSetupForm extends State<AppSetupForm> {
     var llm_file_can_be_opened = false;
     try {
       var f = File(hhh_llm_dl_path).openSync(mode: FileMode.read);
-      print("FREAD: $hhh_llm_dl_path => ${f.read(4).toString()}");
+      dlog("FREAD: $hhh_llm_dl_path => ${f.read(4).toString()}");
       llm_file_can_be_opened = true;
     } catch (e) {
-      print("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path, $e");
+      dlog("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path, $e");
     }
     if (!llm_file_can_be_opened) {
-      print("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path");
+      dlog("$soft: CANNOT OPEN AND READ LLM FILE AT $hhh_llm_dl_path");
       // TODO: Backtrack to a safer llm file location
     }
 
     if (!(llm_file_exists && llm_file_can_be_opened)) return false;
     var llm_file_size = await File(hhh_llm_dl_path).length();
 
-    print(
+    dlog(
         "_checkLLMfile hhh_llm_dl_path = $hhh_llm_dl_path llm_file_exists = $llm_file_exists llm_file_size = $llm_file_size");
 
     var llm_file_ok = llm_file_exists && (llm_file_size == llm_size);
@@ -2313,7 +2458,7 @@ class _AppSetupForm extends State<AppSetupForm> {
   }
 
   _updateAdvancedForm(Map<String, dynamic> f) {
-    print("SETUP ADVANCED SETTINGS FORM UPDATE: ${jsonEncode(f)}");
+    dlog("SETUP ADVANCED SETTINGS FORM UPDATE: ${jsonEncode(f)}");
     String? hhh_dir;
     String? custom_default_model;
     _advanced_form_errors = [];
@@ -2354,12 +2499,12 @@ class _AppSetupForm extends State<AppSetupForm> {
           RootAppParams(hhh_dir, custom_default_model, custom_model_dirs);
 
       setState(() {
-        print("ADVANCED SETUP FORM SUBMIT UNLOCKED");
+        dlog("ADVANCED SETUP FORM SUBMIT UNLOCKED");
         canUserAdvance = true;
       });
     } else {
       setState(() {
-        print("ADVANCED SETUP FORM SUBMIT LOCKED");
+        dlog("ADVANCED SETUP FORM SUBMIT LOCKED");
         canUserAdvance = false;
       });
     }
@@ -2489,11 +2634,11 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                   CollapsibleWidget(
                       crossCircle: true,
                       onExpand: () {
-                        print("START HTTP DOWNLOAD SEQUENCE");
+                        dlog("START HTTP DOWNLOAD SEQUENCE");
                         _oneClickInstallInit();
                       },
                       onCollapse: () async {
-                        print("CLOSE HTTP DOWNLOAD SEQUENCE");
+                        dlog("CLOSE HTTP DOWNLOAD SEQUENCE");
                         var completer = Completer<bool?>();
                         showCancelInstallationDialog(context,
                             onYesButtonPressed: () {
@@ -2564,11 +2709,11 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                           // 'https://example.com/index.html'
                                           destinationPath: hhh_llm_dl_path,
                                           onDownloadEnd: (success, b, c) {
-                                            print(
+                                            dlog(
                                                 "DOWNLOAD COMPLETE: $success $b $c");
                                             if (success) {
                                               _downloadSucceeded = true;
-                                              print("CHECKING LLM FILE...");
+                                              dlog("CHECKING LLM FILE...");
                                               _oneClickInstallCheckLLM();
                                             } else {
                                               _downloadFailed = true;
@@ -2662,7 +2807,7 @@ LLM checkpoints are large binary files. To download, store, manage and operate t
                                           Timer(
                                               const Duration(milliseconds: 500),
                                               () {
-                                            print(
+                                            dlog(
                                                 "COMPLETING ADVANCED APP SETUP WITH PARAMS=${_validRootAppParams!.toJson()}");
                                             widget.onSetupComplete(
                                                 _validRootAppParams!);
@@ -2773,7 +2918,7 @@ Future<int> resolve_native_ctxlen(String new_modelpath) async {
     metadata =
         await parseGGUF(new_modelpath, findKeys: {"llama.context_length"});
   } catch (e) {
-    print("Error in parseGGUF: $e");
+    dlog("Error in parseGGUF: $e");
   }
 
   var model_filename = Path.basename(new_modelpath);
@@ -3010,7 +3155,7 @@ class ProgressTypingBuilder extends StatelessWidget {
   }
 }
 
-class ActiveChatDialogState extends State<ActiveChatDialog>
+class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     with WidgetsBindingObserver {
   ChatManager chatManager = ChatManager();
   MetadataManager metaKV = MetadataManager();
@@ -3047,15 +3192,18 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   String? _htmlCode;
 
-  Map<String, dynamic>? _modalState;
+  List<Map<String, dynamic>> _modalStack = [];
 
   void _hideModal() {
-    if (_modalState?['onClose'] != null) {
-      _modalState?['onClose']();
+    if (_modalStack.isNotEmpty) {
+      var _modal = _modalStack.last;
+      if (_modal?['onClose'] != null) {
+        _modal?['onClose']();
+      }
+      setState(() {
+        _modalStack.removeLast();
+      });
     }
-    setState(() {
-      _modalState = null;
-    });
   }
 
   void _showModal({
@@ -3071,42 +3219,47 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     bool expanded = false,
     VoidCallback? onClose,
   }) {
-    if (toggle) {
-      if (_modalState?['toggle_key'] == toggle_key ||
-          (title is String && _modalState?['title'] == title)) {
-        print("TOGGLE MODAL: OFF");
+    if (toggle && _modalStack.isNotEmpty) {
+      var _modal = _modalStack.last;
+      if (_modal?['toggle_key'] == toggle_key ||
+          (title is String && _modal?['title'] == title)) {
+        dlog("TOGGLE MODAL: OFF");
         _hideModal();
         return;
       }
     }
+    var _modal = {
+      'title': title,
+      'content': content,
+      'buttonText': buttonText,
+      'no_icon': no_icon,
+      'no_controls': no_controls,
+      'backdrop_glass': backdrop_glass,
+      'padding': padding,
+      'onClose': onClose,
+      'expanded': expanded,
+    };
     setState(() {
-      _modalState = {
-        'title': title,
-        'content': content,
-        'buttonText': buttonText,
-        'no_icon': no_icon,
-        'no_controls': no_controls,
-        'backdrop_glass': backdrop_glass,
-        'padding': padding,
-        'onClose': onClose,
-        'expanded': expanded,
-      };
+      _modalStack.add(_modal);
     });
   }
 
   Widget buildModals(BuildContext context) {
-    if (_modalState != null) {
-      return showOverlay(context,
-          title: _modalState?['title'],
-          content: _modalState?['content'],
-          buttonText: _modalState?['buttonText'],
-          expanded: _modalState?['expanded'] ?? false,
-          padding: _modalState?['padding'], onClose: () {
-        _hideModal();
-      },
-          no_icon: _modalState?['no_icon'] ?? false,
-          no_controls: _modalState?['no_controls'] ?? false,
-          backdrop_glass: _modalState?['backdrop_glass'] ?? false);
+    if (_modalStack.isNotEmpty) {
+      return Stack(
+          children: _modalStack.reversed
+              .map((_modal) => showOverlay(context,
+                      title: _modal?['title'],
+                      content: _modal?['content'],
+                      buttonText: _modal?['buttonText'],
+                      expanded: _modal?['expanded'] ?? false,
+                      padding: _modal?['padding'], onClose: () {
+                    _hideModal();
+                  },
+                      no_icon: _modal?['no_icon'] ?? false,
+                      no_controls: _modal?['no_controls'] ?? false,
+                      backdrop_glass: _modal?['backdrop_glass'] ?? false))
+              .toList());
     } else {
       return Container();
     }
@@ -3150,7 +3303,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     llm_load_progress = 0.0;
     suspended = false;
     llama_init_json = resolve_init_json();
-    _modalState = null;
+    _modalStack = [];
     dashChatInputController.dispose();
     dashChatInputController = TextEditingController();
     _htmlCode = null;
@@ -3158,7 +3311,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   @override
   void initState() {
-    print("LIFECYCLE: ACTIVE CHAT .INITSTATE()");
+    dlog("LIFECYCLE: ACTIVE CHAT .INITSTATE()");
     super.initState();
     if (isMobile()) WidgetsBinding.instance.addObserver(this);
     // if (!isMobile()) {
@@ -3169,7 +3322,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (isMobile() && state == AppLifecycleState.paused) {
-      print(
+      dlog(
           "ANDROID OS: PAUSED. The app is about to be suspended, persisting...");
       _cancel_timers();
       persistState();
@@ -3178,15 +3331,15 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     }
 
     if (state == AppLifecycleState.resumed) {
-      print(
+      dlog(
           "ANDROID OS: RESUMED. The app has been resumed, suspended=$suspended");
       if (suspended && llm.initialized) {
-        print("Attempting to restore AI answer streaming...");
+        dlog("Attempting to restore AI answer streaming...");
         if (_msg_streaming) {
           _enable_stream_poll_timer();
         }
       } else {
-        print(
+        dlog(
             "suspended=$suspended, llm.initialized=${llm.initialized} => attempting to restart AI & chat...");
         reinitState();
         setState(() {});
@@ -3196,13 +3349,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   @override
   void dispose() {
-    print("LIFECYCLE: ACTIVE CHAT .DISPOSE()");
+    dlog("LIFECYCLE: ACTIVE CHAT .DISPOSE()");
     dashChatInputController.dispose();
     dashChatInputFocusNode.dispose();
     if (isMobile()) {
       WidgetsBinding.instance!.removeObserver(this);
     }
-    print("ActiveChatDialogState: attempting to persist state...");
+    dlog("ActiveChatDialogState: attempting to persist state...");
     _cancel_timers();
     // persistState();
     ui_stop_llm_generation(now: true);
@@ -3216,11 +3369,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   //   final key = event.logicalKey.keyLabel;
   //
   //   if (event is KeyDownEvent) {
-  //     print("Key down: $key");
+  //     dlog("Key down: $key");
   //   } else if (event is KeyUpEvent) {
-  //     print("Key up: $key");
+  //     dlog("Key up: $key");
   //   } else if (event is KeyRepeatEvent) {
-  //     print("Key repeat: $key");
+  //     dlog("Key repeat: $key");
   //   }
   //
   //   return false;
@@ -3228,7 +3381,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   _cancel_timers() {
     if (_msg_poll_timer?.isActive ?? false) {
-      print(
+      dlog(
           "WARNING, PERSISTING DURING AI MESSAGE STREAMING, CANCELING POLLING");
       _msg_poll_timer?.cancel();
     }
@@ -3236,14 +3389,14 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   void lock_interaction() {
     setState(() {
-      print("ACTIONS LOCKED");
+      dlog("ACTIONS LOCKED");
       _initialized = false;
     });
   }
 
   void unlock_interaction() {
     setState(() {
-      print("ACTIONS UNLOCKED");
+      dlog("ACTIONS UNLOCKED");
       _initialized = true;
     });
   }
@@ -3323,7 +3476,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (_msg_streaming && llm.streaming) {
       ret['_ai_msg_stream_acc'] = _messages[0].text;
     }
-    // print("SERIALIZED_CHAT: $ret");
+    // dlog("SERIALIZED_CHAT: $ret");
     return ret;
   }
 
@@ -3335,22 +3488,22 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       _last_chat_persist = DateTime.parse(json['_persist_datetime'] ?? "");
 
       var chat_uuid = Uuid.fromJson(json['chat_uuid']);
-      print("CURRENT CHAT UUID: $chat_uuid");
+      dlog("CURRENT CHAT UUID: $chat_uuid");
 
       _current_chat = await chatManager.getChat(chat_uuid);
       if (_current_chat == null) {
-        print("No chat retrieved");
+        dlog("No chat retrieved");
         return false;
       }
 
-      print("CURRENT CHAT UUID: ${_current_chat?.toJson()}");
+      dlog("CURRENT CHAT UUID: ${_current_chat?.toJson()}");
 
       // var restored_messages = msgs_fromJson(jsonObject: json['messages']);
       var restored_messages = dbMsgsToDashChatMsgs(await chatManager
           .getMessagesFromChat(_current_chat!.uuid, reversed: true));
 
       if (restored_messages.isEmpty) {
-        print("No messages retrieved");
+        dlog("No messages retrieved");
         return false;
       }
 
@@ -3381,21 +3534,21 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       var json = toJson();
       await metaKV.setMetadata("_persist_active_chat_state", json);
     } catch (e) {
-      print("Exception in ActiveChatDialogState.persistState: $e");
+      dlog("Exception in ActiveChatDialogState.persistState: $e");
       var t1 = DateTime.now();
-      print("DB PERSIST [FAILURE] TOOK ${t1.difference(t0).inMilliseconds}ms");
+      dlog("DB PERSIST [FAILURE] TOOK ${t1.difference(t0).inMilliseconds}ms");
       return false;
     }
     _last_chat_persist = DateTime.now();
     var t1 = DateTime.now();
-    print("DB PERSIST [SUCCESS] TOOK ${t1.difference(t0).inMilliseconds}ms");
+    dlog("DB PERSIST [SUCCESS] TOOK ${t1.difference(t0).inMilliseconds}ms");
     return true;
   }
 
   Future<void> clearPersistedState({onlyStreaming = false}) async {
     try {
       if (onlyStreaming) {
-        print("clearPersistedState onlyStreaming = true");
+        dlog("clearPersistedState onlyStreaming = true");
 
         var data = await metaKV.getMetadata("_persist_active_chat_state");
         if (data == null) {
@@ -3405,13 +3558,13 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           jmap["_msg_streaming"] = false;
           jmap.remove("_ai_msg_stream_acc");
           await metaKV.setMetadata("_persist_active_chat_state", jmap);
-          print("clearPersistedState SUCCESS");
+          dlog("clearPersistedState SUCCESS");
         }
       } else {
         await metaKV.deleteMetadata("_persist_active_chat_state");
       }
     } catch (e) {
-      print(
+      dlog(
           "Error during clearPersistedState, onlyStreaming=$onlyStreaming, Exception:$e");
     }
   }
@@ -3420,7 +3573,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     try {
       var data = await metaKV.getMetadata("_persist_active_chat_state");
       if (data == null) {
-        print("PERSISTED CHAT STATE SLOT EMPTY");
+        dlog("PERSISTED CHAT STATE SLOT EMPTY");
         return false;
       }
       var restored = false;
@@ -3428,8 +3581,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       try {
         restored = await fromJson(data);
       } catch (e) {
-        print("Exception while restoring chat from db: $e");
-        print("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
+        dlog("Exception while restoring chat from db: $e");
+        dlog("COULD NOT PARSE CHAT PERSIST STATE, CLEARING IT");
         await metaKV.deleteMetadata("_persist_active_chat_state");
       }
 
@@ -3453,7 +3606,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
           var partial_answer = data['_ai_msg_stream_acc'];
           if (partial_answer is String && partial_answer.isNotEmpty) {
-            print("RESTORING PARTIAL AI ANSWER...: $partial_answer");
+            dlog("RESTORING PARTIAL AI ANSWER...: $partial_answer");
 
             if (llm.streaming) {
               lock_interaction();
@@ -3475,19 +3628,19 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
       // Clean possible erroneous states, e.g. last msg is user's
       if (_messages[0].user == user) {
-        print("LAST MESSAGE IS FROM USER, REWINDING...");
+        dlog("LAST MESSAGE IS FROM USER, REWINDING...");
         var rewound = await rewindChat(1);
         if (rewound.isNotEmpty && rewound[0].username == "user") {
           set_chat_input_field(rewound[0].message);
-          print("REWIND SUCCESSFUL");
+          dlog("REWIND SUCCESSFUL");
         } else {
-          print("REWIND FAIlED, rewound=$rewound");
+          dlog("REWIND FAIlED, rewound=$rewound");
         }
       }
 
       return true;
     } catch (e) {
-      print("Exception in ActiveChatDialogState.restoreState: $e");
+      dlog("Exception in ActiveChatDialogState.restoreState: $e");
       return false;
     }
   }
@@ -3540,7 +3693,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (_current_chat != null) {
       return _current_chat!;
     } else {
-      print("ERROR IN ADD MSG: NO ACTIVE CHAT, THIS SHOULD NOT HAPPEN");
+      dlog("ERROR IN ADD MSG: NO ACTIVE CHAT, THIS SHOULD NOT HAPPEN");
       await create_new_chat();
       return _current_chat!;
     }
@@ -3598,7 +3751,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           (_prompt_processing_progress - 1.0).abs() < 0.01) {
         var now = DateTime.now();
         try {
-          print(
+          dlog(
               "Completed prompt processing at ${now.toString()}, time taken: ${now.difference(_prompt_processing_initiated!).inMilliseconds}ms");
         } catch (e) {}
         _prompt_processing_completed = now;
@@ -3611,7 +3764,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
               current.uuid, completedMsg.content, "AI");
           await clearPersistedState(onlyStreaming: true);
         } else {
-          print("ERROR: COULD NOT GENERATE STREAMING MESSAGE");
+          dlog("ERROR: COULD NOT GENERATE STREAMING MESSAGE");
           await clearPersistedState(onlyStreaming: true);
           // TODO handle this hypo case
         }
@@ -3628,7 +3781,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             meta: {"_interrupted": true, "_canceled_by_user": true});
         await metaKV.deleteMetadata("_msg_stream_in_progress_");
       } else {
-        print("LLM HAS NOT STARTED GENERATING YET");
+        dlog("LLM HAS NOT STARTED GENERATING YET");
         // TODO handle
       }
     }
@@ -3652,7 +3805,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
         markChatMessageSpecial(_messages[0], _messages[0].customProperties);
 
-        print("${_messages[0].customProperties}");
+        dlog("${_messages[0].customProperties}");
 
         _typingUsers = [];
         _incomplete_msg = null;
@@ -3695,7 +3848,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     });
 
     var now = DateTime.now();
-    print("Initiated prompt processing at ${now.toString()}");
+    dlog("Initiated prompt processing at ${now.toString()}");
 
     _prompt_processing_ntokens = 1.0 * llm.tokenize(m.text).length;
     _prompt_processing_initiated = now;
@@ -3715,6 +3868,17 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       _messages.insert(0, msg);
       _enable_stream_poll_timer();
     });
+  }
+
+  Future<Map<String, Map<String, dynamic>>> getUserRuntimeSettings() async {
+    Map<String, Map<String, dynamic>> user_runtime_settings =
+        transformMapToNestedMap(await metaKV
+                .getMetadata("_runtime_app_settings", defaultValue: {}) ??
+            {});
+
+    dlog("USER_RUNTIME_SETTINGS: $user_runtime_settings");
+
+    return user_runtime_settings;
   }
 
   void reload_model_from_file(
@@ -3748,9 +3912,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       ];
     });
 
-    print("llm.initialize [2]: $new_modelpath");
+    dlog("llm.initialize [2]: $new_modelpath");
     llm.initialize(
-        custom_format: resolve_prompt_format(new_modelpath),
+        custom_format: resolve_prompt_format(new_modelpath,
+            user_runtime_settings: await getUserRuntimeSettings()),
         modelpath: new_modelpath,
         llama_init_json:
             resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
@@ -3822,7 +3987,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (Platform.isAndroid) {
       var sp = widget.appInitParams.storagePermissionGranted;
       if (!sp) {
-        print("SETUP INCOMPLETE: STORAGE PERMISSION NOT GRANTED");
+        dlog("SETUP INCOMPLETE: STORAGE PERMISSION NOT GRANTED");
         // TODO: return false;
       }
     }
@@ -3831,19 +3996,19 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   void attemptToRestartChat() {
     if (!_needs_restore) {
-      print("attemptToRestartChat(): already tried, avoding restore");
+      dlog("attemptToRestartChat(): already tried, avoding restore");
       _initialized = true;
       return;
     }
-    print("ActiveChatDialogState: attemptToRestartChat()...");
+    dlog("ActiveChatDialogState: attemptToRestartChat()...");
     restoreState().then((success) {
       _needs_restore = false;
       if (!success) {
-        print("[ERROR] RESTORE FAILED, CREATING NEW CHAT");
+        dlog("[ERROR] RESTORE FAILED, CREATING NEW CHAT");
         create_new_chat();
       } else {
-        print("[OK] RESTORE CHAT SUCCEEDED");
-        print("Messages: ${msgs_toJson()}");
+        dlog("[OK] RESTORE CHAT SUCCEEDED");
+        dlog("Messages: ${msgs_toJson()}");
         setState(() {
           _initialized = true;
         });
@@ -3855,7 +4020,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     try {
       var data = await metaKV.getMetadata("_persist_active_chat_state");
       if (data == null) {
-        print("PERSISTED CHAT STATE SLOT EMPTY");
+        dlog("PERSISTED CHAT STATE SLOT EMPTY");
         return null;
       } else {
         if (data != null) {
@@ -3864,10 +4029,10 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             var msgs = await chatManager
                 .getMessagesFromChat(Uuid.fromJson(data!["chat_uuid"]));
             if (msgs.isNotEmpty) {
-              print("!!! ${msgs[0]}");
+              dlog("!!! ${msgs[0]}");
               if (msgs[0].meta != null &&
                   msgs[0].meta.containsKey("_is_system_message_with_prompt")) {
-                print("FOUND SYSTEM MESSAGE: ${msgs[0]}");
+                dlog("FOUND SYSTEM MESSAGE: ${msgs[0]}");
                 if (msgs[0].meta.containsKey("_llm_modelpath")) {
                   return msgs[0].meta!["_llm_modelpath"] as String;
                 }
@@ -3877,7 +4042,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
         }
       }
     } catch (e) {
-      print("Exception: $e");
+      dlog("Exception: $e");
     }
     return null;
   }
@@ -3893,9 +4058,9 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (llm.init_in_progress ||
         llm.state == LLMEngineState.INITIALIZED_SUCCESS ||
         llm.state == LLMEngineState.INITIALIZED_FAILURE) {
-      print("initAIifNotAlready: llm.init_in_progress");
+      dlog("initAIifNotAlready: llm.init_in_progress");
       if (!_initialized && llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
-        print("LLM already initialized, unlocking actions");
+        dlog("LLM already initialized, unlocking actions");
         unlock_interaction();
         if (attempt_restore_chat) {
           attemptToRestartChat();
@@ -3904,8 +4069,8 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     } else if (!llm.initialized && // TODO: streamline llm engine states
         llm.init_postponed &&
         getAppInitParams() != null) {
-      print("initAIifNotAlready: llm.init_postponed");
-      print("INITIALIZING NATIVE LIBRPCSERVER");
+      dlog("initAIifNotAlready: llm.init_postponed");
+      dlog("INITIALIZING NATIVE LIBRPCSERVER");
       if (Platform.isAndroid) {
         requestStoragePermission();
       }
@@ -3920,24 +4085,25 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       _not_default_model = false;
       if (!force_default_model && chat_modelpath != null) {
         if (File(chat_modelpath).existsSync()) {
-          print("RESTORING CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
+          dlog("RESTORING CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
           modelpath = chat_modelpath;
           _not_default_model = true;
         } else {
-          print(
+          dlog(
               "WARNING COULD NOT ACCESS CUSTOM MODEL FROM SAVED CHAT: $chat_modelpath");
-          print("FALLBACK TO DEFAULT MODEL");
+          dlog("FALLBACK TO DEFAULT MODEL");
           fallback = true;
         }
       } else {
-        print("LOADING DEFAULT MODEL: $default_modelpath");
+        dlog("LOADING DEFAULT MODEL: $default_modelpath");
       }
 
       var native_ctxlen = await resolve_native_ctxlen(modelpath);
 
-      print("llm.initialize [1]: $modelpath");
+      dlog("llm.initialize [1]: $modelpath");
       llm.initialize(
-          custom_format: resolve_prompt_format(modelpath),
+          custom_format: resolve_prompt_format(modelpath,
+              user_runtime_settings: await getUserRuntimeSettings()),
           modelpath: modelpath,
           llama_init_json:
               resolve_init_json(n_ctx: min(MAX_CTXLEN, native_ctxlen)),
@@ -3949,7 +4115,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
           onInitDone: (success) {
             if (success) {
               _initial_modelload_done = true;
-              print("ActiveChatDialogState: attempting to restore state...");
+              dlog("ActiveChatDialogState: attempting to restore state...");
               if (force_new_chat_after_model_change ||
                   !attempt_restore_chat ||
                   fallback) {
@@ -3976,7 +4142,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
             }
           });
     } else if (llm.initialized && !_initialized) {
-      print("initAIifNotAlready: llm.initialized && !_initialized");
+      dlog("initAIifNotAlready: llm.initialized && !_initialized");
       // reentry
       attemptToRestartChat();
       unlock_interaction();
@@ -3984,7 +4150,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
   }
 
   onAppSetupComplete(RootAppParams p) async {
-    print("!!! SETUP COMPLETE, RECEIVED PARAMS: ${p.toJson()}");
+    dlog("!!! SETUP COMPLETE, RECEIVED PARAMS: ${p.toJson()}");
     var metadb = MetadataManager();
     await metadb.setMetadata("root_app_params", jsonEncode(p.toJson()));
     widget.appInitParams.params = p;
@@ -4087,7 +4253,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     llm.deinitialize();
 
     // TODO: make this unnecessary
-    print("Reloading LLM Engine ...");
+    dlog("Reloading LLM Engine ...");
     llm = LLMEngine();
   }
 
@@ -4097,11 +4263,11 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
     if (defaultLLM != null && p != null) {
       var current_llm = Path.basename(llm.modelpath);
 
-      print(
+      dlog(
           "ui_create_new_active_chat(): current_llm=$current_llm, defaultLLM=$defaultLLM");
 
       if (false && force_default_llm && current_llm != defaultLLM) {
-        print("ui_create_new_active_chat(): llm.deinitialize()");
+        dlog("ui_create_new_active_chat(): llm.deinitialize()");
         cleanup_llm();
         reload_model_from_file(resolve_llm_file(p, model_file: defaultLLM), () {
           setState(() {
@@ -4152,21 +4318,21 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
 
   startCodeServer() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 65123);
-    print("Server running on IP : ${server!.address}On Port : ${server!.port}");
+    dlog("Server running on IP : ${server!.address}On Port : ${server!.port}");
     await for (var request in server!) {
-      print(
+      dlog(
           "HTTPSERVER REQUEST: ${request.method} ${request.uri.path} $request");
       if (request.method == "GET" &&
           request.uri.path == "/code.html" &&
           _htmlCode != null) {
-        print("HTTP RESP: $_htmlCode}");
+        dlog("HTTP RESP: $_htmlCode}");
         request.response
           ..headers.contentType = ContentType.html
           ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
           ..write(_htmlCode)
           ..close();
       } else {
-        print(
+        dlog(
             "HTTPSERVER UNKNOWN REQUEST: ${request.method} ${request.uri.path} $request");
       }
     }
@@ -4295,12 +4461,12 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       //   Row(mainAxisAlignment: MainAxisAlignment.start, children: [
       //     CustomButton(const Text("Open Code in Browser"), iconIdle: Icons.link,
       //         onTap: () {
-      //       print("CODE PLAY: $code");
+      //       dlog("CODE PLAY: $code");
       //       showCodePlayer(code, forceDesktopMode: true);
       //     })
       //   ]),
       CustomButton(const Text("Play"), iconIdle: Icons.play_arrow, onTap: () {
-        print("CODE PLAY: $code");
+        dlog("CODE PLAY: $code");
         showCodePlayer(code);
       })
     ];
@@ -4358,7 +4524,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       aiIsThinking = true;
     }
 
-    // print("aiIsThinking: $aiIsThinking, showMsgProgress: $showMsgProgress");
+    // dlog("aiIsThinking: $aiIsThinking, showMsgProgress: $showMsgProgress");
 
     var _app_setup_done = app_setup_done();
 
@@ -4728,7 +4894,7 @@ class ActiveChatDialogState extends State<ActiveChatDialog>
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
-        child: (_htmlCode != null || _modalState != null)
+        child: (_htmlCode != null || _modalStack.isNotEmpty)
             ? Stack(children: [
                 Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -5049,7 +5215,7 @@ class _SingleChatHistoryPageState extends State<SingleChatHistoryPage> {
 
   void loadData() async {
     if (widget.chatId != null) {
-      print("Chat History: ${widget.chatId}");
+      dlog("Chat History: ${widget.chatId}");
       _chatUuid = Uuid.fromString(widget.chatId!);
       _chat = await _chatManager.getChat(_chatUuid!);
       _chatHistory =
@@ -5329,52 +5495,106 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   }
 }
 
-class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
+class DbNotifier<T> extends AsyncNotifier<T> {
   final MetadataManager _metadataManager = MetadataManager();
   final String dbkey;
+  final T defaultValue;
 
-  SettingsNotifier({required this.dbkey});
+  DbNotifier({required this.dbkey, required this.defaultValue});
 
   @override
-  FutureOr<Map<String, dynamic>> build() async {
-    restore();
-    return {};
+  FutureOr<T> build() async {
+    await restore();
+    var ret = state.value ?? {} as T;
+    dlog("DbNotifier build: $ret");
+    return ret;
   }
 
-  Future<void> updateSettings(Map<String, dynamic> newSettings,
-      {patch = false}) async {
-    if (patch) {}
-    await persist(newSettings);
-    state = AsyncValue.data(newSettings);
+  Future<void> commit(T incoming_update, {patch = false}) async {
+    T to_save = incoming_update;
+
+    if (patch) {
+      var current = state.value;
+      if (current == null) {
+        await restore();
+      }
+      current = state.value;
+      if (current != null) {
+        if (current is Map<String, Map<String, dynamic>> &&
+            incoming_update is Map<String, Map<String, dynamic>>) {
+          to_save = handleMapOfMapsMerge(current, incoming_update) as T;
+        } else if (current is Map<String, dynamic> &&
+            incoming_update is Map<String, dynamic>) {
+          to_save = handleMapMerge(current, incoming_update) as T;
+        }
+      }
+    }
+
+    await persist(to_save);
+    state = AsyncValue.data(to_save);
   }
 
-  Future<void> persist(Map<String, dynamic> settings) async {
+  Map<String, Map<String, dynamic>> handleMapOfMapsMerge(
+      Map<String, Map<String, dynamic>> current,
+      Map<String, Map<String, dynamic>> incoming_update) {
+    return {...current, ...incoming_update};
+  }
+
+  Map<String, dynamic> handleMapMerge(
+      Map<String, dynamic> current, Map<String, dynamic> incoming_update) {
+    return {...current, ...incoming_update};
+  }
+
+  Future<void> persist(T settings) async {
     await _metadataManager.setMetadata(dbkey, settings);
   }
 
   Future<void> restore() async {
     state = const AsyncValue.loading();
-    final restoredSettings = await restoreSettings();
+    final restoredSettings = await restoreSettings(defaultValue: defaultValue);
     state = AsyncValue.data(restoredSettings);
   }
 
-  Future<Map<String, dynamic>> restoreSettings() async {
-    var ret = await _metadataManager.getMetadata(dbkey, defaultValue: {});
-    if (ret is Map) {
-      print("RESTORE <SETTINGS:$dbkey>: $ret");
-      return Map<String, dynamic>.from(ret);
+  Future<T> restoreSettings({T? defaultValue}) async {
+    var ret =
+        await _metadataManager.getMetadata(dbkey, defaultValue: defaultValue);
+
+    if (ret != null) {
+      dlog("RESTORE <DbNotifier:$dbkey>: $ret");
+      if (T is Map<String, dynamic>) {
+        return ret as T;
+      } else if (T is Map<String, Map<String, dynamic>>) {
+        // Handle the case when T is Map<String, dynamic>
+        return Future.value(transformMapToNestedMap(ret) as T);
+      }
     }
-    return {};
+
+    return defaultValue ?? defaultValue as T;
   }
 }
 
-final settingsProvider =
-    AsyncNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
-        () => SettingsNotifier(dbkey: "_app_settings"));
+Map<String, Map<String, dynamic>> transformMapToNestedMap(
+    Map<String, dynamic> map) {
+  Map<String, Map<String, dynamic>> transformedMap = {};
+  map.forEach((key, value) {
+    transformedMap[key] = (value as Map)
+        .map((innerKey, innerValue) => MapEntry(innerKey, innerValue));
+  });
+  return transformedMap;
+}
 
-final runtimeSettingsProvider =
-    AsyncNotifierProvider<SettingsNotifier, Map<String, dynamic>>(
-        () => SettingsNotifier(dbkey: "_runtime_app_settings"));
+final settingsProvider = AsyncNotifierProvider<DbNotifier<Map<String, dynamic>>,
+        Map<String, dynamic>>(
+    () => DbNotifier(dbkey: "_app_settings", defaultValue: {}));
+
+final runtimeSettingsProvider = AsyncNotifierProvider<
+        DbNotifier<Map<String, Map<String, dynamic>>>,
+        Map<String, Map<String, dynamic>>>(
+    () => DbNotifier(dbkey: "_runtime_app_settings", defaultValue: {}));
+
+final customPromptFormatsProvider = AsyncNotifierProvider<
+        DbNotifier<Map<String, dynamic>>, Map<String, dynamic>>(
+    () => DbNotifier(dbkey: "_custom_prompt_formats", defaultValue: {}));
 
 class SettingsPage extends ConsumerStatefulWidget {
   @override
@@ -5428,8 +5648,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         var data = _formKey.currentState?.value ?? {};
                         final settingsNotifier =
                             ref.read(settingsProvider.notifier);
-                        print("SAVE SETTINGS: $data");
-                        settingsNotifier.updateSettings(data);
+                        dlog("SAVE SETTINGS: $data");
+                        settingsNotifier.commit(data);
                       },
                       child: Column(
                         children: <Widget>[
@@ -5448,7 +5668,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               IconButton(
                                 icon: const Icon(Icons.add_box_outlined),
                                 onPressed: () {
-                                  print("ADD NEW PROMPT");
+                                  dlog("ADD NEW PROMPT");
                                 },
                                 color: Colors.black,
                               )
@@ -5513,22 +5733,22 @@ class LifecycleObserver extends WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     switch (state) {
       case AppLifecycleState.resumed:
-        print('LIFECYCLE: App is resumed');
+        dlog('LIFECYCLE: App is resumed');
         break;
       case AppLifecycleState.paused:
-        print('LIFECYCLE: App is paused');
+        dlog('LIFECYCLE: App is paused');
         break;
       case AppLifecycleState.inactive:
-        print('LIFECYCLE: App is inactive');
+        dlog('LIFECYCLE: App is inactive');
         break;
       case AppLifecycleState.detached:
-        print('LIFECYCLE: App is detached');
+        dlog('LIFECYCLE: App is detached');
         break;
       case AppLifecycleState.hidden:
-        print('LIFECYCLE: App is hidden');
+        dlog('LIFECYCLE: App is hidden');
         break;
       default:
-        print('LIFECYCLE: AppLifecycleState: $state');
+        dlog('LIFECYCLE: AppLifecycleState: $state');
         break;
     }
   }
@@ -5758,7 +5978,7 @@ class _PseudoRouter extends State<PseudoRouter> {
         _currentPage = page;
       });
     } catch (e) {
-      print('Navigation error: $e');
+      dlog('Navigation error: $e');
     }
   }
 
@@ -5852,7 +6072,7 @@ Color getAIMsgColor(BuildContext context) =>
     Theme.of(context).listTileTheme.tileColor ??
     Color.fromRGBO(21, 33, 59, 1.0);
 
-class HandheldHelper extends StatelessWidget {
+class HandheldHelper extends ConsumerWidget {
   const HandheldHelper({super.key});
   // const Color.fromRGBO(21, 33, 59, 1.0)
   // const Color.fromRGBO(39, 49, 39, 1.0)
@@ -5928,7 +6148,7 @@ class HandheldHelper extends StatelessWidget {
 
   // This widget is the root of your application.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     var colorScheme = ColorScheme.fromSeed(
         seedColor: Colors.cyan.shade500, primary: Colors.cyan.shade100);
     var isDarkMode =
@@ -5949,16 +6169,17 @@ class HandheldHelper extends StatelessWidget {
 }
 
 void main(List<String> args) async {
+  if ((Platform.environment["DEBUG"] ?? "").isNotEmpty) {
+    dlog = print;
+  }
+
   if (isMobile()) {
-    print("[LOG] Initializing app lifecycle observer...");
+    dlog("[LOG] Initializing app lifecycle observer...");
     WidgetsFlutterBinding.ensureInitialized();
     final observer = LifecycleObserver();
     WidgetsBinding.instance!.addObserver(observer);
   }
 
-  if ((Platform.environment["DEBUG"] ?? "").isNotEmpty) {
-    dlog = print;
-  }
   dlog("CMD ARGS: ${args.join(',')}");
 
   WidgetsFlutterBinding.ensureInitialized();
@@ -5978,7 +6199,7 @@ void main(List<String> args) async {
 
     //TODO: load user-defined prompt formats
   } catch (e) {
-    print("Could not load default prompt formats: $e");
+    dlog("Could not load default prompt formats: $e");
   }
 
   runApp(const ProviderScope(child: HandheldHelper()));

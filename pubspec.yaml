@@ -75,7 +75,7 @@ dependencies:
   flutter_fast_forms: ^13.0.0
 
 dev_dependencies:
-  ffigen: ^10.0.0
+  ffigen: ^11.0.0
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: ^0.13.1
