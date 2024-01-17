@@ -597,7 +597,9 @@ class _EditableDropDownFormFieldState extends State<EditableDropDownFormField> {
                       )
                     ]))
               ])
-            : null);
+            : null,
+        border: widget.border,
+        padding: widget.padding);
   }
 }
 
@@ -610,6 +612,7 @@ class EditableDropDownFormField extends StatefulWidget {
   String? editorLabelText;
   String? textFieldHint;
   TextStyle? textFieldStyle;
+  bool padding;
   bool border;
 
   EditableDropDownFormField(
@@ -621,7 +624,8 @@ class EditableDropDownFormField extends StatefulWidget {
       this.textFieldHint,
       this.editorLabelText,
       this.iconColor = Colors.black,
-      this.border = false});
+      this.border = false,
+      this.padding = false});
 
   @override
   _EditableDropDownFormFieldState createState() =>
@@ -673,15 +677,14 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
             padding: const EdgeInsets.all(20.0),
             decoration: BoxDecoration(
                 color: formBgColor, borderRadius: BorderRadius.circular(8.0)),
-            // clipBehavior: Clip.antiAlias,
-            constraints: BoxConstraints(
-              maxHeight: screenHeight,
-              maxWidth: isMobile()
-                  ? screenWidth * 0.95
-                  : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
-            ),
-            child: SingleChildScrollView(
-                child: FormBuilder(
+            clipBehavior: Clip.antiAlias,
+            // constraints: BoxConstraints(
+            //   maxHeight: screenHeight,
+            //   maxWidth: isMobile()
+            //       ? screenWidth * 0.95
+            //       : min(screenWidth, DESKTOP_MAX_CONTENT_WIDTH),
+            // ),
+            child: FormBuilder(
               key: _formKey,
               initialValue: settings_for_model,
               onChanged: () {
@@ -693,26 +696,36 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
               },
               child: Column(
                 children: <Widget>[
-                  EditableDropDownFormField(
-                    items: promptFormats,
-                    initialValue: settings_for_model["prompt_format"] ??
-                        defaultPromptFormat,
-                    fieldName: "prompt_format",
-                    labelText: "PROMPT FORMAT",
-                    textFieldHint: PROMPT_FORMAT_TPL_EXAMPLE,
-                  ),
-                  const SizedBox(height: 10),
-                  EditableDropDownFormField(
-                    items: systemPrompts,
-                    initialValue: settings_for_model["system_prompt"] ??
-                        defaultSystemPrompt,
-                    fieldName: "system_prompt",
-                    labelText: "SYSTEM PROMPT",
-                    textFieldHint: "your custom prompt format string here",
-                  ),
+                  Container(
+                      padding: const EdgeInsets.all(20.0),
+                      decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8.0)),
+                      child: Column(children: [
+                        EditableDropDownFormField(
+                          items: promptFormats,
+                          initialValue: settings_for_model["prompt_format"] ??
+                              defaultPromptFormat,
+                          fieldName: "prompt_format",
+                          labelText: "PROMPT FORMAT",
+                          textFieldHint: PROMPT_FORMAT_TPL_EXAMPLE,
+                          border: false,
+                        ),
+                        const SizedBox(height: 10),
+                        EditableDropDownFormField(
+                          items: systemPrompts,
+                          initialValue: settings_for_model["system_prompt"] ??
+                              defaultSystemPrompt,
+                          fieldName: "system_prompt",
+                          labelText: "SYSTEM PROMPT",
+                          textFieldHint:
+                              "your custom prompt format string here",
+                          border: false,
+                        )
+                      ])),
                 ],
               ),
-            )));
+            ));
       },
       loading: () => const CircularProgressIndicator(),
       error: (err, stack) => Text('Error: $err'),
@@ -771,58 +784,60 @@ Widget showOverlay(BuildContext context,
                         GestureDetector(
                           onTap: () {},
                           child: Container(
-                            height: expanded
-                                ? MediaQuery.of(context).size.height * 0.8
-                                : null,
-                            width: expanded
-                                ? MediaQuery.of(context).size.width *
-                                    (isMobile() ? 0.95 : 0.8)
-                                : null,
-                            padding: EdgeInsets.all(padding.toDouble()),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              children: <Widget>[
-                                if (!no_icon) ...[
-                                  const Icon(
-                                    Icons.warning,
-                                    size: 100,
-                                    color: Colors.orange,
+                              height: expanded
+                                  ? MediaQuery.of(context).size.height * 0.8
+                                  : null,
+                              width: expanded
+                                  ? MediaQuery.of(context).size.width *
+                                      (isMobile() ? 0.95 : 0.8)
+                                  : null,
+                              padding: EdgeInsets.all(padding.toDouble()),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                children: <Widget>[
+                                  if (!no_icon) ...[
+                                    const Icon(
+                                      Icons.warning,
+                                      size: 100,
+                                      color: Colors.orange,
+                                    ),
+                                    const SizedBox(height: 20)
+                                  ],
+                                  widgetOrDefault(
+                                    title,
+                                    context,
+                                    defaultTextStyle: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold),
                                   ),
-                                  const SizedBox(height: 20)
+                                  const SizedBox(height: 20),
+                                  Expanded(
+                                      child: Container(
+                                          child: SingleChildScrollView(
+                                              child: widgetOrDefault(
+                                    content,
+                                    context,
+                                    defaultTextStyle:
+                                        const TextStyle(fontSize: 18),
+                                  )))),
+                                  const SizedBox(height: 20),
+                                  if (!no_controls)
+                                    ElevatedButton(
+                                      child: Text(buttonText),
+                                      onPressed: () {
+                                        if (onClose != null) {
+                                          onClose();
+                                        }
+                                        // Navigator.of(context).pop();
+                                      },
+                                    ),
                                 ],
-                                widgetOrDefault(
-                                  title,
-                                  context,
-                                  defaultTextStyle: const TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 20),
-                                widgetOrDefault(
-                                  content,
-                                  context,
-                                  defaultTextStyle:
-                                      const TextStyle(fontSize: 18),
-                                ),
-                                const SizedBox(height: 20),
-                                if (!no_controls)
-                                  ElevatedButton(
-                                    child: Text(buttonText),
-                                    onPressed: () {
-                                      if (onClose != null) {
-                                        onClose();
-                                      }
-                                      // Navigator.of(context).pop();
-                                    },
-                                  ),
-                              ],
-                            ),
-                          ),
-                        )
+                              )),
+                        ),
                       ])))));
 }
 
