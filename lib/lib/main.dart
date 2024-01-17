@@ -140,6 +140,13 @@ Map<String, LLMPromptFormat> known_prompt_formats = {
   "minichat": MiniChatPromptFormat
 };
 
+const hermes_sysmsg =
+    "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
+
+Map<String, String> basic_system_prompts = {
+  "default helpful assistant": hermes_sysmsg
+};
+
 LLMPromptFormat resolve_prompt_format(String modelpath,
     {builtin_chat_template_priority = true,
     Map<String, Map<String, dynamic>> user_runtime_settings = const {}}) {
@@ -497,6 +504,20 @@ Widget maybeExpanded({required Widget child, bool expanded = false}) {
   return (ret, 'chatml');
 }
 
+(List<DropdownMenuItem<String>>, String?) buildSystemPromptMenu(
+    AsyncValue<Map<String, dynamic>> custom) {
+  var basePfs = basic_system_prompts.keys.toList();
+
+  if (custom.hasValue) {
+    basePfs.addAll(custom.value!.keys); // TODO
+  }
+
+  var ret = List<DropdownMenuItem<String>>.from(
+      basePfs.map((k) => DropdownMenuItem<String>(value: k, child: Text(k))));
+
+  return (ret, basic_system_prompts.keys.first);
+}
+
 Widget formField(String name, Widget field,
     {bool uppercase = true,
     bool border = true,
@@ -634,9 +655,12 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
     final settingsProvider = runtimeSettingsProvider;
     final runtimeSettings = ref.watch(settingsProvider);
     final customPromptFormats = ref.watch(customPromptFormatsProvider);
+    final customSystemPrompts = ref.watch(customSystemPromptsProvider);
 
     var (promptFormats, defaultPromptFormat) =
         buildPromptFormatMenu(customPromptFormats);
+    var (systemPrompts, defaultSystemPrompt) =
+        buildSystemPromptMenu(customSystemPrompts);
 
     return runtimeSettings.when(
       data: (settings) {
@@ -676,6 +700,15 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
                     fieldName: "prompt_format",
                     labelText: "PROMPT FORMAT",
                     textFieldHint: PROMPT_FORMAT_TPL_EXAMPLE,
+                  ),
+                  const SizedBox(height: 10),
+                  EditableDropDownFormField(
+                    items: systemPrompts,
+                    initialValue: settings_for_model["system_prompt"] ??
+                        defaultSystemPrompt,
+                    fieldName: "system_prompt",
+                    labelText: "SYSTEM PROMPT",
+                    textFieldHint: "your custom prompt format string here",
                   ),
                 ],
               ),
@@ -1509,9 +1542,6 @@ class ActiveChatDialog extends ConsumerStatefulWidget {
   @override
   ConsumerState<ActiveChatDialog> createState() => ActiveChatDialogState();
 }
-
-const hermes_sysmsg =
-    "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
 
 class Settings {
   Map<String, dynamic> data = {'_msg_poll_ms': isMobile() ? 100 : 20};
@@ -5608,6 +5638,10 @@ final runtimeSettingsProvider = AsyncNotifierProvider<
 final customPromptFormatsProvider = AsyncNotifierProvider<
         DbNotifier<Map<String, dynamic>>, Map<String, dynamic>>(
     () => DbNotifier(dbkey: "_custom_prompt_formats", defaultValue: {}));
+
+final customSystemPromptsProvider = AsyncNotifierProvider<
+        DbNotifier<Map<String, dynamic>>, Map<String, dynamic>>(
+    () => DbNotifier(dbkey: "_custom_system_prompts", defaultValue: {}));
 
 class DDItem {
   final String? title;
