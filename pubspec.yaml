@@ -73,6 +73,7 @@ dependencies:
   flutter_form_builder: ^9.1.1
   jinja: ^0.5.0
   flutter_fast_forms: ^13.0.0
+  form_builder_cupertino_fields: ^0.2.1
 
 dev_dependencies:
   ffigen: ^11.0.0

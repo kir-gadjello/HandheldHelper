@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/widgets.dart';
 import 'package:handheld_helper/db.dart';
 import 'package:handheld_helper/gguf.dart';
@@ -39,6 +40,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
+import 'package:form_builder_cupertino_fields/form_builder_cupertino_fields.dart';
 
 import 'custom_widgets.dart';
 import 'llm_engine.dart';
@@ -539,6 +541,37 @@ Widget formField(String name, Widget field,
       ]));
 }
 
+class EditableDropDownFormField extends StatefulWidget {
+  List<DropdownMenuItem<String>> items;
+  String? initialValue;
+  String fieldName;
+  Color iconColor;
+  String labelText;
+  String? editorLabelText;
+  String? textFieldHint;
+  TextStyle? textFieldStyle;
+  bool padding;
+  bool border;
+  bool useCupertino;
+
+  EditableDropDownFormField(
+      {required this.items,
+      required this.fieldName,
+      required this.labelText,
+      this.initialValue,
+      this.textFieldStyle,
+      this.textFieldHint,
+      this.editorLabelText,
+      this.iconColor = Colors.black,
+      this.border = false,
+      this.padding = false,
+      this.useCupertino = false});
+
+  @override
+  _EditableDropDownFormFieldState createState() =>
+      _EditableDropDownFormFieldState();
+}
+
 class _EditableDropDownFormFieldState extends State<EditableDropDownFormField> {
   bool editShown = false;
 
@@ -574,16 +607,26 @@ class _EditableDropDownFormFieldState extends State<EditableDropDownFormField> {
                     widget.editorLabelText ?? "ADD NEW ${widget.labelText}",
                     Row(children: [
                       Expanded(
-                          child: FormBuilderTextField(
-                              name: '__dd_edit_new__${widget.fieldName}',
-                              initialValue: "",
-                              style: widget.textFieldStyle,
-                              decoration: InputDecoration(
-                                hintText: widget.textFieldHint,
-                                hintStyle: TextStyle(color: hintColor),
-                              ),
-                              maxLines:
-                                  widget.textFieldHint?.split('\n').length ??
+                          child: widget.useCupertino
+                              ? FormBuilderCupertinoTextField(
+                                  name: '__dd_edit_new__${widget.fieldName}',
+                                  initialValue: "",
+                                  style: widget.textFieldStyle,
+                                  maxLines: widget.textFieldHint
+                                          ?.split('\n')
+                                          .length ??
+                                      3)
+                              : FormBuilderTextField(
+                                  name: '__dd_edit_new__${widget.fieldName}',
+                                  initialValue: "",
+                                  style: widget.textFieldStyle,
+                                  decoration: InputDecoration(
+                                    hintText: widget.textFieldHint,
+                                    hintStyle: TextStyle(color: hintColor),
+                                  ),
+                                  maxLines: widget.textFieldHint
+                                          ?.split('\n')
+                                          .length ??
                                       3)),
                       IconButton(
                         icon: const Icon(Icons.add),
@@ -603,34 +646,39 @@ class _EditableDropDownFormFieldState extends State<EditableDropDownFormField> {
   }
 }
 
-class EditableDropDownFormField extends StatefulWidget {
-  List<DropdownMenuItem<String>> items;
-  String? initialValue;
-  String fieldName;
-  Color iconColor;
-  String labelText;
-  String? editorLabelText;
-  String? textFieldHint;
-  TextStyle? textFieldStyle;
-  bool padding;
-  bool border;
-
-  EditableDropDownFormField(
-      {required this.items,
-      required this.fieldName,
-      required this.labelText,
-      this.initialValue,
-      this.textFieldStyle,
-      this.textFieldHint,
-      this.editorLabelText,
-      this.iconColor = Colors.black,
-      this.border = false,
-      this.padding = false});
-
-  @override
-  _EditableDropDownFormFieldState createState() =>
-      _EditableDropDownFormFieldState();
+Widget controlGroup({
+  required label,
+  required List<Widget> children,
+  TextStyle? labelStyle,
+  String? hint,
+  Color? hintColor,
+}) {
+  return Container(
+      padding: const EdgeInsets.only(left: 10.0, right: 10.0, bottom: 15.0),
+      decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8.0)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.start, children: [
+          Text(label.toUpperCase(), style: labelStyle),
+          if (hint != null)
+            Tooltip(
+              message: hint,
+              preferBelow: false,
+              child: IconButton(
+                color: hintColor,
+                icon: const Icon(Icons.help_outline_rounded, size: 16),
+                onPressed: () {},
+              ),
+            )
+        ]),
+        Container(
+            padding: const EdgeInsets.only(left: 10.0),
+            child: Column(children: children))
+      ]));
 }
+
+// const  samplerSettings
 
 class RuntimeSettingsPage extends ConsumerStatefulWidget {
   @override
@@ -696,12 +744,12 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
               },
               child: Column(
                 children: <Widget>[
-                  Container(
-                      padding: const EdgeInsets.all(20.0),
-                      decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
-                          borderRadius: BorderRadius.circular(8.0)),
-                      child: Column(children: [
+                  controlGroup(
+                      label: "prompt settings",
+                      hint:
+                          'Updating these settings applies only to new conversations',
+                      hintColor: hintColor,
+                      children: [
                         EditableDropDownFormField(
                           items: promptFormats,
                           initialValue: settings_for_model["prompt_format"] ??
@@ -719,10 +767,32 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
                           fieldName: "system_prompt",
                           labelText: "SYSTEM PROMPT",
                           textFieldHint:
-                              "your custom prompt format string here",
+                              "your custom system prompt string here",
                           border: false,
                         )
-                      ])),
+                      ]),
+                  const SizedBox(height: 10),
+                  controlGroup(
+                      label: "sampler settings",
+                      hint:
+                          'Updating these settings is active immediately for the next generated message',
+                      hintColor: hintColor,
+                      children: [
+                        formField(
+                            "temperature",
+                            FormBuilderCupertinoSlider(
+                              name: "temperature",
+                              initialValue: 0.0,
+                              min: 0.0,
+                              max: 1.0,
+                              contentPadding: EdgeInsets.zero,
+                              // contentPadding:
+                              //     EdgeInsets.symmetric(horizontal: 5.0),
+                              // displayValues: DisplayValues.none,
+                            ),
+                            border: false,
+                            padding: false)
+                      ])
                 ],
               ),
             ));
