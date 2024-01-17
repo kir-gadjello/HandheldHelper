@@ -13,7 +13,8 @@ import 'package:crypto/crypto.dart';
 bool isMobile() => Platform.isAndroid;
 bool isDevelopment() =>
     const String.fromEnvironment("DEVELOPMENT", defaultValue: "").isNotEmpty;
-void Function(Object?) dlog = (Object? args) {};
+
+void Function(Object?) dlog = isDevelopment() ? print : (Object? args) {};
 
 String capitalizeAllWord(String value) {
   var result = value[0].toUpperCase();

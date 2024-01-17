@@ -518,6 +518,95 @@ Widget formField(String name, Widget field,
       ]));
 }
 
+class _EditableDropDownFormFieldState extends State<EditableDropDownFormField> {
+  bool editShown = false;
+
+  @override
+  Widget build(BuildContext context) {
+    var hintColor = Theme.of(context).hintColor;
+    var formBgColor = Colors.grey.lighter(50); // getUserMsgColor(context);
+
+    return formField(
+        widget.labelText,
+        Row(children: [
+          Expanded(
+              child: FormBuilderDropdown<String>(
+                  name: widget.fieldName,
+                  initialValue: widget.initialValue,
+                  items: widget.items,
+                  dropdownColor: formBgColor)),
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            onPressed: () {
+              dlog("FORM: ADD NEW <${widget.fieldName}>");
+              setState(() {
+                editShown = !editShown;
+              });
+            },
+            color: widget.iconColor,
+          )
+        ]),
+        trailing: editShown
+            ? Column(children: [
+                const SizedBox(height: 10),
+                formField(
+                    widget.editorLabelText ?? "ADD NEW ${widget.labelText}",
+                    Row(children: [
+                      Expanded(
+                          child: FormBuilderTextField(
+                              name: '__dd_edit_new__${widget.fieldName}',
+                              initialValue: "",
+                              style: widget.textFieldStyle,
+                              decoration: InputDecoration(
+                                hintText: widget.textFieldHint,
+                                hintStyle: TextStyle(color: hintColor),
+                              ),
+                              maxLines:
+                                  widget.textFieldHint?.split('\n').length ??
+                                      3)),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: () {
+                          dlog("FORM: SAVE NEW <${widget.fieldName}>");
+                          setState(() {
+                            editShown = false;
+                          });
+                        },
+                        color: widget.iconColor,
+                      )
+                    ]))
+              ])
+            : null);
+  }
+}
+
+class EditableDropDownFormField extends StatefulWidget {
+  List<DropdownMenuItem<String>> items;
+  String? initialValue;
+  String fieldName;
+  Color iconColor;
+  String labelText;
+  String? editorLabelText;
+  String? textFieldHint;
+  TextStyle? textFieldStyle;
+  bool border;
+
+  EditableDropDownFormField(
+      {required this.items,
+      required this.fieldName,
+      required this.labelText,
+      this.initialValue,
+      this.textFieldStyle,
+      this.textFieldHint,
+      this.editorLabelText,
+      this.iconColor = Colors.black,
+      this.border = false});
+
+  @override
+  _EditableDropDownFormFieldState createState() =>
+      _EditableDropDownFormFieldState();
+}
+
 class RuntimeSettingsPage extends ConsumerStatefulWidget {
   @override
   _RuntimeSettingsPageState createState() => _RuntimeSettingsPageState();
@@ -580,95 +669,19 @@ class _RuntimeSettingsPageState extends ConsumerState<RuntimeSettingsPage> {
               },
               child: Column(
                 children: <Widget>[
-                  formField(
-                      "prompt format",
-                      Row(children: [
-                        Expanded(
-                            child: FormBuilderDropdown<String>(
-                                name: 'prompt_format',
-                                initialValue:
-                                    settings_for_model["prompt_format"] ??
-                                        defaultPromptFormat,
-                                items: promptFormats,
-                                dropdownColor: formBgColor)),
-                        IconButton(
-                          icon: const Icon(Icons.edit_note),
-                          onPressed: () {
-                            dlog("ADD NEW PROMPT FORMAT");
-                            setState(() {
-                              promptFormatEditShown = !promptFormatEditShown;
-                            });
-                          },
-                          color: Colors.black,
-                        )
-                      ]),
-                      trailing: promptFormatEditShown
-                          ? Column(children: [
-                              const SizedBox(height: 10),
-                              formField(
-                                  "ADD NEW PROMPT FORMAT",
-                                  Row(children: [
-                                    Expanded(
-                                        child: FormBuilderTextField(
-                                            name: '_new_prompt_format',
-                                            initialValue: "",
-                                            style: codeSpanStyle,
-                                            decoration: InputDecoration(
-                                              hintText:
-                                                  PROMPT_FORMAT_TPL_EXAMPLE,
-                                              hintStyle:
-                                                  TextStyle(color: hintColor),
-                                            ),
-                                            maxLines: PROMPT_FORMAT_TPL_EXAMPLE
-                                                .split('\n')
-                                                .length)),
-                                    IconButton(
-                                      icon: const Icon(Icons.add),
-                                      onPressed: () {
-                                        dlog("SAVE NEW PROMPT FORMAT");
-                                        setState(() {
-                                          promptFormatEditShown = false;
-                                        });
-                                      },
-                                      color: Colors.black,
-                                    )
-                                  ]))
-                            ])
-                          : null),
-                  // Row(
-                  //   children: [
-                  //     Expanded(
-                  //       child: FormBuilderDropdown<String>(
-                  //           name: 'default_system_prompt',
-                  //           items: [DropdownMenuItem(child: Text('Basic'))]),
-                  //     ),
-                  //     IconButton(
-                  //       icon: const Icon(Icons.add_box_outlined),
-                  //       onPressed: () {
-                  //         dlog("ADD NEW PROMPT FORMAT");
-                  //       },
-                  //       color: Colors.black,
-                  //     )
-                  //   ],
-                  // ),
-                  // FormBuilderTextField(
-                  //     decoration: InputDecoration(
-                  //       enabledBorder: OutlineInputBorder(
-                  //         borderSide: BorderSide(
-                  //             color: Colors.red,
-                  //             width: 3,
-                  //             style: BorderStyle.solid),
-                  //       ),
-                  //       hintText: 'Enter text',
-                  //     ),
-                  //     name: 'field1'),
-                  // FormBuilderTextField(name: 'field2'),
-                  // Add more FormBuilderTextField widgets as needed
+                  EditableDropDownFormField(
+                    items: promptFormats,
+                    initialValue: settings_for_model["prompt_format"] ??
+                        defaultPromptFormat,
+                    fieldName: "prompt_format",
+                    labelText: "PROMPT FORMAT",
+                    textFieldHint: PROMPT_FORMAT_TPL_EXAMPLE,
+                  ),
                 ],
               ),
             )));
       },
-      loading: () => CircularProgressIndicator(),
+      loading: () => const CircularProgressIndicator(),
       error: (err, stack) => Text('Error: $err'),
     );
   }
@@ -5596,6 +5609,260 @@ final customPromptFormatsProvider = AsyncNotifierProvider<
         DbNotifier<Map<String, dynamic>>, Map<String, dynamic>>(
     () => DbNotifier(dbkey: "_custom_prompt_formats", defaultValue: {}));
 
+class DDItem {
+  final String? title;
+  final String content;
+
+  DDItem({this.title, required this.content});
+}
+
+// class EditableStringDropdownFormControl extends StatefulWidget {
+//   final List<DDItem> items;
+//   final Color? dropdownBackgroundColor;
+//   final Color? dropdownTextColor;
+//   final int minContentLines;
+//   final Function(String)? onSave;
+//   final Widget Function(VoidCallback onPressed)? saveButtonBuilder;
+//   final String? label;
+//   final String? initialValue;
+//
+//   EditableStringDropdownFormControl({
+//     Key? key,
+//     required this.items,
+//     this.dropdownBackgroundColor,
+//     this.dropdownTextColor,
+//     this.minContentLines = 1,
+//     this.onSave,
+//     this.saveButtonBuilder,
+//     this.label,
+//     this.initialValue,
+//   }) : super(key: key);
+//
+//   @override
+//   _EditableStringDropdownFormControlState createState() =>
+//       _EditableStringDropdownFormControlState();
+// }
+//
+// class _EditableStringDropdownFormControlState
+//     extends State<EditableStringDropdownFormControl> {
+//   final _formKey = GlobalKey<FormBuilderState>();
+//   bool _isAddingNewItem = false;
+//   String? _newItem;
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return FormBuilder(
+//       key: _formKey,
+//       child: Column(
+//         crossAxisAlignment: CrossAxisAlignment.start,
+//         children: [
+//           if (widget.label != null)
+//             Text(
+//               widget.label!,
+//               style: Theme.of(context).textTheme.titleMedium,
+//             ),
+//           Row(
+//             children: [
+//               Expanded(
+//                 child: FormBuilderDropdown(
+//                   name: 'dropdown',
+//                   decoration: InputDecoration(
+//                     border: const OutlineInputBorder(),
+//                     fillColor: widget.dropdownBackgroundColor,
+//                     filled: true,
+//                   ),
+//                   items: widget.items.map((item) {
+//                     return DropdownMenuItem(
+//                       value: item.content,
+//                       child: Text(
+//                         item.title ?? item.content,
+//                         style: TextStyle(color: widget.dropdownTextColor),
+//                       ),
+//                     );
+//                   }).toList(),
+//                 ),
+//               ),
+//               IconButton(
+//                 icon: Icon(Icons.add,
+//                     color: _isAddingNewItem ? Colors.blue : null),
+//                 onPressed: () {
+//                   setState(() {
+//                     _isAddingNewItem = !_isAddingNewItem;
+//                   });
+//                 },
+//               ),
+//             ],
+//           ),
+//           if (_isAddingNewItem)
+//             Row(
+//               children: [
+//                 Expanded(
+//                   child: TextField(
+//                     maxLines: null,
+//                     minLines: widget.minContentLines,
+//                     decoration: InputDecoration(
+//                       border: OutlineInputBorder(
+//                         borderRadius: BorderRadius.circular(10),
+//                       ),
+//                     ),
+//                     onChanged: (value) {
+//                       _newItem = value;
+//                     },
+//                   ),
+//                 ),
+//                 widget.saveButtonBuilder != null
+//                     ? widget.saveButtonBuilder!(() {
+//                         widget.items.add(DDItem(content: _newItem!));
+//                         widget.onSave?.call(_newItem!);
+//                         _formKey.currentState?.fields['dropdown']
+//                             ?.didChange(_newItem);
+//                         setState(() {
+//                           _isAddingNewItem = false;
+//                           _newItem = null;
+//                         });
+//                       })
+//                     : ElevatedButton(
+//                         onPressed: () {
+//                           widget.items.add(DDItem(content: _newItem!));
+//                           widget.onSave?.call(_newItem!);
+//                           _formKey.currentState?.fields['dropdown']
+//                               ?.didChange(_newItem);
+//                           setState(() {
+//                             _isAddingNewItem = false;
+//                             _newItem = null;
+//                           });
+//                         },
+//                         child: Text('Save'),
+//                       ),
+//               ],
+//             ),
+//         ],
+//       ),
+//     );
+//   }
+// }
+
+// class EditableStringDropdownFormControl extends FormBuilderField<String> {
+//   final List<DDItem> items;
+//   final Color? dropdownBackgroundColor;
+//   final Color? dropdownTextColor;
+//   final int minContentLines;
+//   final Function(String)? onSave;
+//   final Widget Function(VoidCallback onPressed)? saveButtonBuilder;
+//   final String? label;
+//   final String? initialValue;
+//
+//   EditableStringDropdownFormControl({
+//     Key? key,
+//     required this.items,
+//     this.dropdownBackgroundColor,
+//     this.dropdownTextColor,
+//     this.minContentLines = 1,
+//     this.onSave,
+//     this.saveButtonBuilder,
+//     this.label,
+//     this.initialValue,
+//     required String name,
+//     FormFieldValidator<String>? validator,
+//     bool enabled = true,
+//   }) : super(name: name, validator: validator, enabled: enabled);
+//
+//   @override
+//   _EditableStringDropdownFormControlState createState() =>
+//       _EditableStringDropdownFormControlState();
+// }
+//
+// class _EditableStringDropdownFormControlState
+//     extends State<EditableStringDropdownFormControl> {
+//   bool _isAddingNewItem = false;
+//   String? _newItem;
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return Column(
+//       crossAxisAlignment: CrossAxisAlignment.start,
+//       children: [
+//         if (widget.label != null)
+//           Text(
+//             widget.label!,
+//             style: Theme.of(context).textTheme.titleMedium,
+//           ),
+//         Row(
+//           children: [
+//             Expanded(
+//               child: FormBuilderDropdown(
+//                 name: widget.name,
+//                 decoration: InputDecoration(
+//                   border: const OutlineInputBorder(),
+//                   fillColor: widget.dropdownBackgroundColor,
+//                   filled: true,
+//                 ),
+//                 items: widget.items.map((item) {
+//                   return DropdownMenuItem(
+//                     value: item.content,
+//                     child: Text(
+//                       item.title ?? item.content,
+//                       style: TextStyle(color: widget.dropdownTextColor),
+//                     ),
+//                   );
+//                 }).toList(),
+//               ),
+//             ),
+//             IconButton(
+//               icon:
+//                   Icon(Icons.add, color: _isAddingNewItem ? Colors.blue : null),
+//               onPressed: () {
+//                 setState(() {
+//                   _isAddingNewItem = !_isAddingNewItem;
+//                 });
+//               },
+//             ),
+//           ],
+//         ),
+//         if (_isAddingNewItem)
+//           Row(
+//             children: [
+//               Expanded(
+//                 child: TextField(
+//                   maxLines: null,
+//                   minLines: widget.minContentLines,
+//                   decoration: InputDecoration(
+//                     border: OutlineInputBorder(
+//                       borderRadius: BorderRadius.circular(10),
+//                     ),
+//                   ),
+//                   onChanged: (value) {
+//                     _newItem = value;
+//                   },
+//                 ),
+//               ),
+//               widget.saveButtonBuilder != null
+//                   ? widget.saveButtonBuilder!(() {
+//                       widget.items.add(DDItem(content: _newItem!));
+//                       widget.onSave?.call(_newItem!);
+//                       setState(() {
+//                         _isAddingNewItem = false;
+//                         _newItem = null;
+//                       });
+//                     })
+//                   : ElevatedButton(
+//                       onPressed: () {
+//                         widget.items.add(DDItem(content: _newItem!));
+//                         widget.onSave?.call(_newItem!);
+//                         setState(() {
+//                           _isAddingNewItem = false;
+//                           _newItem = null;
+//                         });
+//                       },
+//                       child: Text('Save'),
+//                     ),
+//             ],
+//           ),
+//       ],
+//     );
+//   }
+// }
+
 class SettingsPage extends ConsumerStatefulWidget {
   @override
   _SettingsPageState createState() => _SettingsPageState();
@@ -5653,6 +5920,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       },
                       child: Column(
                         children: <Widget>[
+                          FormBuilderRadioGroup<String>(
+                            name: 'theme',
+                            decoration:
+                                const InputDecoration(labelText: 'UI Theme'),
+                            orientation: OptionsOrientation.wrap,
+                            options: const [
+                              FormBuilderFieldOption(value: 'System'),
+                              FormBuilderFieldOption(value: 'Light'),
+                              FormBuilderFieldOption(value: 'Dark'),
+                              FormBuilderFieldOption(value: 'Black')
+                            ],
+                            initialValue: 'Male',
+                          ),
+                          FormBuilderChoiceChip<String>(
+                              name: 'Theme',
+                              alignment: WrapAlignment.spaceBetween,
+                              initialValue: 'system',
+                              options: const [
+                                FormBuilderChipOption(value: 'system'),
+                                FormBuilderChipOption(value: 'light'),
+                                FormBuilderChipOption(value: 'dark'),
+                                FormBuilderChipOption(value: 'black'),
+                              ],
+                              onChanged: (value) {
+                                print(value);
+                              }),
+                          // EditableStringDropdownFormControl(
+                          //     label: "Default System Prompt",
+                          //     items: [
+                          //       DDItem(content: "1"),
+                          //       DDItem(content: "2")
+                          //     ]),
                           FormBuilderDropdown<String>(
                               name: 'default_system_prompt',
                               items: [DropdownMenuItem(child: Text('Basic'))]),
