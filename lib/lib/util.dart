@@ -16,6 +16,17 @@ bool isDevelopment() =>
 
 void Function(Object?) dlog = isDevelopment() ? print : (Object? args) {};
 
+Set<Object> logged_once = {};
+
+void dlog_once(Object? o) {
+  if (isDevelopment()) {
+    if (o != null && !logged_once.contains(o)) {
+      print("LOG_ONCE: $o");
+      logged_once.add(o);
+    }
+  }
+}
+
 String capitalizeAllWord(String value) {
   var result = value[0].toUpperCase();
   for (int i = 1; i < value.length; i++) {

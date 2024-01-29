@@ -3296,9 +3296,11 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
   bool _msg_streaming = false;
   Timer? _msg_poll_timer;
   Settings settings = Settings();
-  bool _initialized = false;
+  bool _llm_initialized = false;
   bool _not_default_model = false;
   bool _needs_restore = true;
+  bool _chat_data_initialized = false;
+  bool _actions_locked = false;
   Timer? _token_counter_sync;
   int _input_tokens = 0;
   Chat? _current_chat;
@@ -3415,8 +3417,10 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     _msg_streaming = false;
     _msg_poll_timer;
     settings = Settings();
-    _initialized = false;
+    _llm_initialized = false;
     _needs_restore = true;
+    _chat_data_initialized = false;
+    _actions_locked = false;
     _token_counter_sync;
     _input_tokens = 0;
     _not_default_model = false;
@@ -3518,15 +3522,22 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
   void lock_interaction() {
     setState(() {
       dlog("ACTIONS LOCKED");
-      _initialized = false;
+      _actions_locked = true;
     });
   }
 
   void unlock_interaction() {
     setState(() {
       dlog("ACTIONS UNLOCKED");
-      _initialized = true;
+      _actions_locked = false;
     });
+  }
+
+  bool is_interaction_locked() {
+    return _actions_locked ||
+        _msg_streaming ||
+        !_llm_initialized ||
+        !_chat_data_initialized;
   }
 
   /* TODO: add app level invariant check for message role order (for a hypothetical
@@ -3595,7 +3606,6 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
   Map<String, dynamic> toJson() {
     var ret = {
       '_msg_streaming': _msg_streaming,
-      '_initialized': _initialized,
       '_input_tokens': _input_tokens,
       '_persist_datetime': DateTime.now().toString(),
       'chat_uuid': _current_chat?.uuid.toJson(),
@@ -3611,7 +3621,6 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
   Future<bool> fromJson(Map<String, dynamic> json) async {
     if (json['chat_uuid'] != null) {
       _msg_streaming = json['_msg_streaming'] ?? false;
-      _initialized = json['_initialized'] ?? false;
       _input_tokens = json['_input_tokens'] ?? 0;
       _last_chat_persist = DateTime.parse(json['_persist_datetime'] ?? "");
 
@@ -3808,7 +3817,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     sync_messages_to_llm();
 
     setState(() {
-      _initialized = true;
+      _chat_data_initialized = true;
       _msg_streaming = false;
       _prompt_processing_ntokens = 0.0;
       _prompt_processing_initiated = null;
@@ -4031,7 +4040,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     var native_ctxlen = await resolve_native_ctxlen(new_modelpath);
 
     setState(() {
-      _initialized = false;
+      _llm_initialized = false;
       _messages = [
         ChatMessage(
             user: user_SYSTEM,
@@ -4055,6 +4064,10 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
         onInitDone: (success) async {
           if (success) {
             // await create_new_chat();
+            sync_messages_to_llm();
+            setState(() {
+              _llm_initialized = true;
+            });
             unlock_interaction();
             if (onInitDone != null) {
               onInitDone();
@@ -4124,8 +4137,8 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
 
   void attemptToRestartChat() {
     if (!_needs_restore) {
-      dlog("attemptToRestartChat(): already tried, avoding restore");
-      _initialized = true;
+      dlog_once("attemptToRestartChat(): already tried, avoidng restore");
+      // _initialized = true;
       return;
     }
     dlog("ActiveChatDialogState: attemptToRestartChat()...");
@@ -4138,7 +4151,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
         dlog("[OK] RESTORE CHAT SUCCEEDED");
         dlog("Messages: ${msgs_toJson()}");
         setState(() {
-          _initialized = true;
+          _chat_data_initialized = true;
         });
       }
     });
@@ -4177,22 +4190,29 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
 
   Future<void> initAIifNotAlready(
       {bool force_default_model = true,
-      bool force_new_chat_after_model_change = true,
+      bool force_new_chat_after_model_change = false,
       bool attempt_restore_chat = true,
       void Function(bool)? onInitDone}) async {
     if (_msg_streaming || (!force_default_model && _initial_modelload_done)) {
       return;
     }
+
+    attemptToRestartChat();
+
     if (llm.init_in_progress ||
         llm.state == LLMEngineState.INITIALIZED_SUCCESS ||
         llm.state == LLMEngineState.INITIALIZED_FAILURE) {
       dlog("initAIifNotAlready: llm.init_in_progress");
-      if (!_initialized && llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
+      if (!_llm_initialized &&
+          llm.state == LLMEngineState.INITIALIZED_SUCCESS) {
         dlog("LLM already initialized, unlocking actions");
+        setState(() {
+          _llm_initialized = true;
+        });
         unlock_interaction();
-        if (attempt_restore_chat) {
-          attemptToRestartChat();
-        }
+        // if (attempt_restore_chat) {
+        //   attemptToRestartChat();
+        // }
       }
     } else if (!llm.initialized && // TODO: streamline llm engine states
         llm.init_postponed &&
@@ -4248,12 +4268,18 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
                   !attempt_restore_chat ||
                   fallback) {
                 // custom model could not be loaded, the history would be, strictly speaking, invalid
+                dlog(
+                    "custom model could not be loaded, the history would be, strictly speaking, invalid => creating new chat");
                 create_new_chat();
               } else {
-                if (attempt_restore_chat) {
-                  attemptToRestartChat();
-                }
+                // if (attempt_restore_chat) {
+                //   attemptToRestartChat();
+                // }
               }
+              sync_messages_to_llm();
+              setState(() {
+                _llm_initialized = true;
+              });
               unlock_interaction();
             } else {
               // TODO: handle failure better
@@ -4269,10 +4295,13 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
               onInitDone(success);
             }
           });
-    } else if (llm.initialized && !_initialized) {
+    } else if (llm.initialized && !_llm_initialized) {
       dlog("initAIifNotAlready: llm.initialized && !_initialized");
       // reentry
       attemptToRestartChat();
+      setState(() {
+        _llm_initialized = true;
+      });
       unlock_interaction();
     }
   }
@@ -4304,7 +4333,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
           () {
         setState(() {
           _not_default_model = false;
-          _initialized = true;
+          _llm_initialized = true;
         });
         create_new_chat();
       });
@@ -4399,12 +4428,12 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
         cleanup_llm();
         reload_model_from_file(resolve_llm_file(p, model_file: defaultLLM), () {
           setState(() {
-            _initialized = true;
+            _llm_initialized = true;
           });
           create_new_chat();
         });
         setState(() {
-          _initialized = false;
+          _llm_initialized = false;
         });
       } else {
         llm.clear_state();
@@ -4609,7 +4638,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
 
-    bool actionsEnabled = _initialized && !_msg_streaming;
+    bool actionsEnabled = !is_interaction_locked();
     const Color disabledColor = Colors.white60;
     Color iconEnabledColor = Colors.white;
     Color iconColor = actionsEnabled ? iconEnabledColor : disabledColor;
@@ -4666,222 +4695,215 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
             : const BoxConstraints(
                 maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
               ),
-        child: DashChat(
-          inputOptions: InputOptions(
-              textController: dashChatInputController,
-              focusNode: dashChatInputFocusNode,
-              sendButtonBuilder: (Function fct) => InkWell(
-                    onTap: () => fct(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 10),
-                      child: Stack(children: [
-                        Icon(
-                          size: 40,
-                          Icons.send,
-                          color: _current_msg_input.isNotEmpty
-                              ? activeColor
-                              : hintColor,
+        child: Stack(children: <Widget>[
+          if (!_llm_initialized)
+            Center(
+                child: Column(children: [
+              Padding(
+                  padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
+                  child: Container(
+                      padding: const EdgeInsets.all(3.0),
+                      decoration: BoxDecoration(
+                        color: bgColor!,
+                        border: Border.all(
+                          color: lighterActiveColor,
+                          width: 1.0, // Adjust the width of the border here
                         ),
-                        if (_input_tokens > 0) ...[
-                          Transform.translate(
-                              offset: const Offset(1.0, -20.0),
-                              child: SizedBox(
-                                width: 40,
-                                child: Center(
-                                  child: IntrinsicWidth(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 1.0, horizontal: 2.0),
-                                      alignment: AlignmentDirectional.center,
-                                      decoration: BoxDecoration(
-                                        color: activeColor,
-                                        borderRadius: const BorderRadius.all(
-                                            Radius.circular(10.0)),
+                        borderRadius: BorderRadius.circular(
+                            5.0), // Adjust the radius of the border here
+                      ),
+                      child: LinearProgressIndicator(
+                          value: llm_load_progress,
+                          minHeight: 6.0,
+                          borderRadius: BorderRadius.circular(3.0),
+                          color: activeColor)))
+            ])),
+          DashChat(
+            inputOptions: InputOptions(
+                textController: dashChatInputController,
+                focusNode: dashChatInputFocusNode,
+                sendButtonBuilder: (Function fct) => InkWell(
+                      onTap: () => fct(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 10),
+                        child: Stack(children: [
+                          Icon(
+                            size: 40,
+                            Icons.send,
+                            color: _current_msg_input.isNotEmpty
+                                ? activeColor
+                                : hintColor,
+                          ),
+                          if (_input_tokens > 0) ...[
+                            Transform.translate(
+                                offset: const Offset(1.0, -20.0),
+                                child: SizedBox(
+                                  width: 40,
+                                  child: Center(
+                                    child: IntrinsicWidth(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 1.0, horizontal: 2.0),
+                                        alignment: AlignmentDirectional.center,
+                                        decoration: BoxDecoration(
+                                          color: activeColor,
+                                          borderRadius: const BorderRadius.all(
+                                              Radius.circular(10.0)),
+                                        ),
+                                        child: Text("$_input_tokens",
+                                            style: TextStyle(
+                                                fontSize: 15,
+                                                color: headerTextColor)),
                                       ),
-                                      child: Text("$_input_tokens",
-                                          style: TextStyle(
-                                              fontSize: 15,
-                                              color: headerTextColor)),
                                     ),
                                   ),
-                                ),
-                              ))
-                        ]
-                      ]),
-                    ),
-                  ),
-              // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
-              sendOnEnter: !SEND_SHIFT_ENTER,
-              sendOnShiftEnter: SEND_SHIFT_ENTER,
-              newlineOnShiftEnter: !SEND_SHIFT_ENTER,
-              alwaysShowSend: true,
-              inputToolbarMargin: const EdgeInsets.all(0.0),
-              inputToolbarPadding:
-                  const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
-              inputMaxLines: 15,
-              inputDecoration: InputDecoration(
-                isDense: true,
-                hintText: "Write a message to AI...",
-                hintStyle: TextStyle(color: hintColor),
-                filled: true,
-                fillColor: Colors.grey[100],
-                contentPadding: const EdgeInsets.only(
-                  left: 18,
-                  top: 10,
-                  bottom: 10,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12.0),
-                  borderSide: const BorderSide(
-                    width: 0,
-                    style: BorderStyle.none,
-                  ),
-                ),
-              ),
-              inputToolbarStyle:
-                  BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
-              inputDisabled: _msg_streaming || !(_initialized ?? false),
-              onTextChange: (String upd) {
-                dlog("LOG onTextChange $upd");
-                _current_msg_input = upd;
-                if (_token_counter_sync != null) {
-                  _token_counter_sync?.cancel();
-                }
-                _token_counter_sync =
-                    Timer(const Duration(milliseconds: 300), () {
-                  _update_token_counter(upd);
-                });
-              }),
-          messageListOptions: MessageListOptions(
-              // showTypingPlaceholder: const SizedBox(height: 64),
-              typingBuilder: (ChatUser user) => ProgressTypingBuilder(
-                  user: user,
-                  text: (showMsgProgress || aiIsThinking)
-                      ? 'is thinking'
-                      : 'is typing',
-                  pkey: "prompt_processing_${llm.modelpath}",
-                  workAmount: _prompt_processing_ntokens,
-                  showProgress: showMsgProgress,
-                  progress: (_incomplete_msg?.isNotEmpty ?? false)
-                      ? 1.0
-                      : _prompt_processing_progress)),
-          messageOptions: MessageOptions(
-              maxWidth: isMobile()
-                  ? null
-                  : max(
-                      0,
-                      min(MediaQuery.of(context).size.width,
-                              DESKTOP_MAX_CONTENT_WIDTH) -
-                          30.0),
-              fullWidthRow: true, // || isMobile(),
-              containerColor: aiMsgColor!,
-              currentUserContainerColor: userMsgColor!,
-              textColor: textColor!,
-              currentUserTextColor: textColor!,
-              messageTextBuilder: customMessageTextBuilder,
-              buildCodeBlockActions: attemptToShowCodePlayAction,
-              showCurrentUserAvatar: false,
-              showOtherUsersAvatar: false,
-              messageDecorationBuilder: (ChatMessage message,
-                  ChatMessage? previousMessage, ChatMessage? nextMessage) {
-                if (message.user.firstName == "User") {
-                  return BoxDecoration(
-                    color: userMsgColor,
-                    borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(3.0),
-                        bottomRight: Radius.circular(3.0),
-                        topLeft: Radius.circular(14.0),
-                        bottomLeft: Radius.circular(14.0)),
-                    border: Border(
-                      right: BorderSide(
-                        color:
-                            userMsgBorderColor, // Change this to your desired color
-                        width: 2, // Change this to your desired width
+                                ))
+                          ]
+                        ]),
                       ),
                     ),
-                  );
-                } else {
-                  var _is_system =
-                      message.user.firstName?.toLowerCase() == "system";
-                  Color col = aiMsgColor;
-                  if (_is_system &&
-                      (message.customProperties?.containsKey("_is_ephemeral") ??
-                          false)) {
-                    col = Colors.grey.shade100.withOpacity(0.5);
+                // cursorStyle: CursorStyle({color: Color.fromRGBO(40, 40, 40, 1.0)}),
+                sendOnEnter: !SEND_SHIFT_ENTER,
+                sendOnShiftEnter: SEND_SHIFT_ENTER,
+                newlineOnShiftEnter: !SEND_SHIFT_ENTER,
+                alwaysShowSend: true,
+                inputToolbarMargin: const EdgeInsets.all(0.0),
+                inputToolbarPadding:
+                    const EdgeInsets.fromLTRB(8.0, 2.0, 8.0, 4.0),
+                inputMaxLines: 15,
+                inputDecoration: InputDecoration(
+                  isDense: true,
+                  hintText: "Write a message to AI...",
+                  hintStyle: TextStyle(color: hintColor),
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  contentPadding: const EdgeInsets.only(
+                    left: 18,
+                    top: 10,
+                    bottom: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12.0),
+                    borderSide: const BorderSide(
+                      width: 0,
+                      style: BorderStyle.none,
+                    ),
+                  ),
+                ),
+                inputToolbarStyle:
+                    BoxDecoration(borderRadius: BorderRadius.circular(0.0)),
+                inputDisabled: is_interaction_locked(),
+                onTextChange: (String upd) {
+                  dlog("LOG onTextChange $upd");
+                  _current_msg_input = upd;
+                  if (_token_counter_sync != null) {
+                    _token_counter_sync?.cancel();
                   }
-                  return BoxDecoration(
-                    color: col,
-                    borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(3.0),
-                        bottomLeft: Radius.circular(3.0),
-                        topRight: Radius.circular(14.0),
-                        bottomRight: Radius.circular(14.0)),
-                    border: Border(
-                      left: BorderSide(
-                        color:
-                            aiMsgBorderColor, // Change this to your desired color
-                        width: 2, // Change this to your desired width
+                  _token_counter_sync =
+                      Timer(const Duration(milliseconds: 300), () {
+                    _update_token_counter(upd);
+                  });
+                }),
+            messageListOptions: MessageListOptions(
+                // showTypingPlaceholder: const SizedBox(height: 64),
+                typingBuilder: (ChatUser user) => ProgressTypingBuilder(
+                    user: user,
+                    text: (showMsgProgress || aiIsThinking)
+                        ? 'is thinking'
+                        : 'is typing',
+                    pkey: "prompt_processing_${llm.modelpath}",
+                    workAmount: _prompt_processing_ntokens,
+                    showProgress: showMsgProgress,
+                    progress: (_incomplete_msg?.isNotEmpty ?? false)
+                        ? 1.0
+                        : _prompt_processing_progress)),
+            messageOptions: MessageOptions(
+                maxWidth: isMobile()
+                    ? null
+                    : max(
+                        0,
+                        min(MediaQuery.of(context).size.width,
+                                DESKTOP_MAX_CONTENT_WIDTH) -
+                            30.0),
+                fullWidthRow: true, // || isMobile(),
+                containerColor: aiMsgColor!,
+                currentUserContainerColor: userMsgColor!,
+                textColor: textColor!,
+                currentUserTextColor: textColor!,
+                messageTextBuilder: customMessageTextBuilder,
+                buildCodeBlockActions: attemptToShowCodePlayAction,
+                showCurrentUserAvatar: false,
+                showOtherUsersAvatar: false,
+                messageDecorationBuilder: (ChatMessage message,
+                    ChatMessage? previousMessage, ChatMessage? nextMessage) {
+                  if (message.user.firstName == "User") {
+                    return BoxDecoration(
+                      color: userMsgColor,
+                      borderRadius: const BorderRadius.only(
+                          topRight: Radius.circular(3.0),
+                          bottomRight: Radius.circular(3.0),
+                          topLeft: Radius.circular(14.0),
+                          bottomLeft: Radius.circular(14.0)),
+                      border: Border(
+                        right: BorderSide(
+                          color:
+                              userMsgBorderColor, // Change this to your desired color
+                          width: 2, // Change this to your desired width
+                        ),
                       ),
-                    ),
-                  );
-                }
-              },
-              onLongPressMessage: (m) {
-                String msg = m.text;
-                FlutterClipboard.copy(msg);
-                showSnackBarTop(context,
-                    "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
-              }),
-          currentUser: user,
-          typingUsers: _typingUsers,
-          onSend: (ChatMessage m) {
-            dlog("NEW MSG: ${m.text}");
-            _input_tokens = 0;
-            addMsg(m);
-            dashChatInputController.text = "";
-            dashChatInputController.notifyListeners();
-            if (isMobile()) {
-              dashChatInputFocusNode.unfocus();
-              FocusManager.instance.primaryFocus?.unfocus();
-            }
-            setState(() {});
-          },
-          messages: _messages,
-        ),
+                    );
+                  } else {
+                    var _is_system =
+                        message.user.firstName?.toLowerCase() == "system";
+                    Color col = aiMsgColor;
+                    if (_is_system &&
+                        (message.customProperties
+                                ?.containsKey("_is_ephemeral") ??
+                            false)) {
+                      col = Colors.grey.shade100.withOpacity(0.5);
+                    }
+                    return BoxDecoration(
+                      color: col,
+                      borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(3.0),
+                          bottomLeft: Radius.circular(3.0),
+                          topRight: Radius.circular(14.0),
+                          bottomRight: Radius.circular(14.0)),
+                      border: Border(
+                        left: BorderSide(
+                          color:
+                              aiMsgBorderColor, // Change this to your desired color
+                          width: 2, // Change this to your desired width
+                        ),
+                      ),
+                    );
+                  }
+                },
+                onLongPressMessage: (m) {
+                  String msg = m.text;
+                  FlutterClipboard.copy(msg);
+                  showSnackBarTop(context,
+                      "Message \"${truncateWithEllipsis(16, msg)}\" copied to clipboard");
+                }),
+            currentUser: user,
+            typingUsers: _typingUsers,
+            onSend: (ChatMessage m) {
+              dlog("NEW MSG: ${m.text}");
+              _input_tokens = 0;
+              addMsg(m);
+              dashChatInputController.text = "";
+              dashChatInputController.notifyListeners();
+              if (isMobile()) {
+                dashChatInputFocusNode.unfocus();
+                FocusManager.instance.primaryFocus?.unfocus();
+              }
+              setState(() {});
+            },
+            messages: _messages,
+          )
+        ]),
       )));
-      if (!_initialized) {
-        mainWidget = Stack(
-          children: <Widget>[
-            // Your existing widget tree goes here
-            Center(
-                child: Padding(
-                    padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
-                    child: SizedBox(
-                        width: 512,
-                        child: Container(
-                            padding: EdgeInsets.all(3.0),
-                            decoration: BoxDecoration(
-                              color: bgColor!,
-                              border: Border.all(
-                                color: lighterActiveColor,
-                                width:
-                                    1.0, // Adjust the width of the border here
-                              ),
-                              borderRadius: BorderRadius.circular(
-                                  5.0), // Adjust the radius of the border here
-                            ),
-                            child: LinearProgressIndicator(
-                                value: llm_load_progress,
-                                minHeight: 6.0,
-                                borderRadius: BorderRadius.circular(3.0),
-                                color: activeColor))))),
-            Container(
-              color: Colors.black.withOpacity(0.5),
-            ),
-          ],
-        );
-      }
     } else {
       mainWidget = buildAppSetupScreen();
     }
