@@ -1,0 +1,79 @@
+                 SOFTWARE PROJECT LICENSE AGREEMENT
+                       Version 1, 2 June 2024
+
+ Copyright (C) 2024 Kirill Gadzhello
+
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            DEFINITIONS
+
+  "Licensed Software" means the software project, including all source
+  code files, except those located in the "libraries" subdirectory.
+
+  "Licensor" means Kirill Gadzhello, the creator of the Licensed Software.
+
+  "Licensee" means any person or entity that uses, modifies, or distributes
+  the Licensed Software.
+
+  "Appstore-like Platforms" means online marketplaces for mobile or desktop
+  applications, including but not limited to Google Play, Apple App Store,
+  Jetbrains Marketplace, and any other similar platforms.
+
+                            LICENSE GRANT
+
+  The Licensor hereby grants to the Licensee a non-exclusive, non-transferable
+  license to use, modify, and distribute the Licensed Software under the
+  terms and conditions of this Agreement.
+
+                            GNU GENERAL PUBLIC LICENSE AGREEMENT V3
+
+  The Licensed Software is licensed under the GNU General Public License
+  Agreement Version 3 ("GPLv3"), a copy of which is available at the following URL:
+  https://raw.githubusercontent.com/kir-gadjello/HandheldHelper/main/LICENSE-GPLv3
+  . The terms and conditions of the GPLv3 are incorporated into this Agreement
+  by reference.
+
+                            ADDITIONAL RESTRICTIONS
+
+  Notwithstanding the terms of the GPLv3, the Licensee is prohibited from using
+  any part of the Licensed Software to build applications and plugins that are
+  published on Appstore-like Platforms. This restriction applies to any
+  derivative works of the Licensed Software, including but not limited to
+  modifications, extensions, and adaptations.
+
+                            EXCLUSIVE RIGHTS
+
+  The Licensor reserves the exclusive right to create and publish applications
+  and plugins based on the Licensed Software on Appstore-like Platforms. No
+  Licensee shall have the right to create or publish such applications and
+  plugins without the prior written consent of the Licensor.
+
+                            VIOLATIONS AND ENFORCEMENT
+
+  In the event of a violation of this Agreement, the Licensor reserves the
+  right to notify the appropriate Appstore-like Platform administration and
+  take any other legal action necessary to enforce its rights under this
+  Agreement.
+
+                            GOVERNING LAW AND JURISDICTION
+
+  This Agreement shall be governed by and construed in accordance with the
+  laws of the Republic of Singapore. Any disputes arising out of or related to
+  this Agreement shall be resolved through binding arbitration in accordance
+  with the rules of the Singapore International Arbitration Centre (SIAC).
+
+                            ENTIRE AGREEMENT
+
+  This Agreement constitutes the entire understanding between the parties and
+  supersedes all prior or contemporaneous agreements or understandings,
+  whether written or oral.
+
+                            AMENDMENTS
+
+  This Agreement may not be amended or modified except in writing signed by
+  the Licensor.
+
+  By using, modifying, or distributing the Licensed Software, the Licensee
+  acknowledges that it has read, understands, and agrees to be bound by the
+  terms and conditions of this Agreement.
