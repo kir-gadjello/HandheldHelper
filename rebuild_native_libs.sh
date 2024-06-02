@@ -2,7 +2,7 @@
 
 # Check if LLAMACPP_EMBED_DIR exists and is a valid directory
 if [ -z "$LLAMACPP_EMBED_DIR" ]; then
-  LLAMACPP_EMBED_DIR="./llamacpp-embed"
+  LLAMACPP_EMBED_DIR="$(pwd)/llamacpp-embed"
   if [ ! -d "$LLAMACPP_EMBED_DIR" ]; then
     echo "LLAMACPP_EMBED_DIR is not set and local directory $LLAMACPP_EMBED_DIR does not exist. Initializing submodule..."
     git submodule update --init --recursive

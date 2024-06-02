@@ -4,8 +4,12 @@ import 'package:path/path.dart' as Path;
 import '../lib/llm_engine.dart';
 import 'package:test/test.dart';
 
-const MODEL_LARGE = "../openhermes-2.5-mistral-7b.Q4_K_M.gguf";
-const MODEL_SMALL = "../tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
+String MODEL_DIR = Platform.environment["LLM_MODEL_DIR"] ?? "..";
+
+const LOCAL_MODEL_DIR = "local_test_llms";
+
+String MODEL_LARGE = "openhermes-2.5-mistral-7b.Q4_K_M.gguf";
+String MODEL_SMALL = "tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
 
 const hermes_sysmsg =
     "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
@@ -64,15 +68,60 @@ LLMEngine make_llm() {
           './native/apple_silicon/librpcserver.dylib');
 }
 
+String? checkAllFilesExist({
+  required List<String> directories,
+  required List<String> filenames,
+  Map<String, int>? fileSizes,
+}) {
+  for (final directory in directories) {
+    final dir = Directory(directory);
+    if (!dir.existsSync()) {
+      continue; // skip to next directory
+    }
+
+    bool allFilesExist = true;
+    for (final filename in filenames) {
+      final file = File(Path.join(directory, filename));
+      if (!file.existsSync()) {
+        allFilesExist = false;
+        break;
+      }
+
+      if (fileSizes != null && fileSizes.containsKey(filename)) {
+        final fileSize = file.lengthSync();
+        if (fileSize != fileSizes[filename]) {
+          allFilesExist = false;
+          break;
+        }
+      }
+    }
+
+    if (allFilesExist) {
+      return directory; // return the directory if all files exist
+    }
+  }
+
+  return null; // return null if no directory has all files
+}
+
 void main() async {
-  if (!File(MODEL_LARGE).existsSync() || !File(MODEL_SMALL).existsSync()) {
-    print("This test requires large external files in the outer directory:");
+  var dirs = [MODEL_DIR, LOCAL_MODEL_DIR, ".."];
+  var llm_dir = checkAllFilesExist(
+      directories: dirs, filenames: [MODEL_LARGE, MODEL_SMALL]);
+
+  if (llm_dir == null) {
+    print(
+        "This test requires large external files in one of the following directories: $dirs (set alternative llm model directory via environment variable LLM_MODEL_DIR or run the ./download_test_llms.sh script to populate the local directory):");
     print(MODEL_LARGE);
     print(MODEL_SMALL);
     print(
         "Skipping tests, download the AI model files and place them into the outer directory to proceed");
     return;
   }
+
+  MODEL_LARGE = Path.join(llm_dir, MODEL_LARGE);
+  MODEL_SMALL = Path.join(llm_dir, MODEL_SMALL);
+
   var completer = Completer<void>();
   const timeout = Timeout(Duration(seconds: 10));
 

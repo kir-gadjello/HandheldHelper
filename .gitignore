@@ -2,8 +2,8 @@ lib/commit_hash.dart
 *.so
 *.dylib
 *.zip
-native
 native/**
+local_test_llms/**
 
 # Miscellaneous
 *.class
@@ -18,7 +18,8 @@ native/**
 migrate_working_dir/
 
 # Build files
-macos/Runner/*.dylib
+macos/Runner/libllama.dylib
+macos/Runner/librpcserver.dylib
 
 # IntelliJ related
 *.iml
