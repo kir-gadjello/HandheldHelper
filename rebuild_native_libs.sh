@@ -2,12 +2,16 @@
 
 # Check if LLAMACPP_EMBED_DIR exists and is a valid directory
 if [ -z "$LLAMACPP_EMBED_DIR" ]; then
-  echo "LLAMACPP_EMBED_DIR is not set. Please set it to the correct directory."
-  exit 1
-fi
-if [ ! -d "$LLAMACPP_EMBED_DIR" ]; then
-  echo "LLAMACPP_EMBED_DIR is not a valid directory. Please set it to the correct directory."
-  exit 1
+  LLAMACPP_EMBED_DIR="./llamacpp-embed"
+  if [ ! -d "$LLAMACPP_EMBED_DIR" ]; then
+    echo "LLAMACPP_EMBED_DIR is not set and local directory $LLAMACPP_EMBED_DIR does not exist. Initializing submodule..."
+    git submodule update --init --recursive
+  fi
+else
+  if [ ! -d "$LLAMACPP_EMBED_DIR" ]; then
+    echo "LLAMACPP_EMBED_DIR is not a valid directory. Please set it to the correct directory."
+    exit 1
+  fi
 fi
 
 HHH_DIR=$(pwd)
@@ -22,7 +26,7 @@ if [ "$1" = "android-arm64-v8a-dotprod" ] || [ "$1" = "android" ]; then
   CMAKE_FLAGS="-DCMAKE_TOOLCHAIN_FILE=$TOOLCHAIN_FILE -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-23 -DCMAKE_C_FLAGS=-march=armv8.4a+dotprod -DBUILD_SHARED_LIBS=1"
   LIB_EXT="so"
   TARGET_DIR="android/app/src/main/jniLibs/arm64-v8a"
-elif [ "$BUILD_FLAVOR" = "apple-silicon" ]; then
+elif [ "$1" = "apple-silicon" ]; then
   BUILD_FLAVOR="apple-silicon"
   BUILD_ARCH="apple_silicon"
   CMAKE_FLAGS="-DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1"

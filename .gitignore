@@ -2,7 +2,8 @@ lib/commit_hash.dart
 *.so
 *.dylib
 *.zip
-native/
+native
+native/**
 
 # Miscellaneous
 *.class

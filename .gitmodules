@@ -1,3 +1,7 @@
 [submodule "libraries/dash_chat2"]
 	path = libraries/dash_chat2
 	url = https://github.com/kir-gadjello/dash_chat2
+[submodule "llamacpp-embed"]
+	path = llamacpp-embed
+	url = https://github.com/kir-gadjello/llamacpp-embed
+	branch = libllamarpc-private
