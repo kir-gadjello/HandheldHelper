@@ -1,16 +1,20 @@
-# handheld_helper
+# Handheld Helper
 
-A new Flutter project.
+Basic AI capability should be owned by everyone.
 
-## Getting Started
+An AI that fits in the palm of your hand.
 
-This project is a starting point for a Flutter application.
+# Hardware requirements
+* Mobile: An Android smartphone with >=4GiB RAM
+* Desktop: A Mac M1 with >=16GiB RAM, a Linux PC with >=16GiB RAM
 
-A few resources to get you started if this is your first Flutter project:
+# Building
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+TBD
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## MacOS
+
+## Linux
+
+## Android
+

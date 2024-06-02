@@ -14,7 +14,7 @@ import 'llamarpc_generated_bindings.dart' as binding;
 
 const kDebugMode = true;
 const LLAMA_SO = "librpcserver";
-const bool __DEBUG = true;
+bool __DEBUG = (Platform.environment["DEBUG_LLM_ENGINE"] ?? "").isNotEmpty;
 
 const _IM_END_ = ["<|im_end|>"];
 

@@ -1,5 +1,9 @@
 lib/commit_hash.dart
+*.so
+*.dylib
 *.zip
+native/
+
 # Miscellaneous
 *.class
 *.log
@@ -11,6 +15,9 @@ lib/commit_hash.dart
 .history
 .svn/
 migrate_working_dir/
+
+# Build files
+macos/Runner/*.dylib
 
 # IntelliJ related
 *.iml

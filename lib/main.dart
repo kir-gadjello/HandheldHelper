@@ -3195,9 +3195,13 @@ void markChatMessageSpecial(ChatMessage ret, Map<String, dynamic>? flags) {
 
 List<ChatMessage> dbMsgsToDashChatMsgs(List<Message> msgs) {
   return msgs.map((m) {
+    String text = m.message;
+    if (m.meta.containsKey("_show_text")) {
+      text = m.meta["_show_text"];
+    }
     var ret = ChatMessage(
         user: getChatUserByName(m.username),
-        text: m.message,
+        text: text,
         createdAt: DateTime.fromMillisecondsSinceEpoch(m.date * 1000),
         customProperties: m.meta);
 
@@ -3653,13 +3657,6 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
 
   int? sync_messages_to_llm() {
     llm.msgs = _messages.map((m) {
-      if (m.customProperties != null &&
-          (m.customProperties
-                  ?.containsValue("_is_system_message_with_prompt") ??
-              false)) {
-        return AIChatMessage(m.user.getFullName(),
-            m.customProperties!["_is_system_message_with_prompt"] as String);
-      }
       return AIChatMessage(m.user.getFullName(), m.text);
     }).toList();
     return llm.sync_token_count();
@@ -3787,14 +3784,14 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
       Map<String, dynamic> custom_properties = const {}}) async {
     var sys_msg_metadata = {
       "_is_ephemeral": true,
-      "_is_system_message_with_prompt": system_prompt,
+      "_show_text":
+          "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', system_prompt)}__",
       "_llm_modelpath": llm.modelpath,
       ...custom_properties
     };
 
     var firstMsg = ChatMessage(
-        text:
-            "Beginning of conversation with model at `${llm.modelpath}`\\\nSystem prompt:\\\n__${settings.get('system_message', system_prompt)}__",
+        text: system_prompt,
         user: user_SYSTEM,
         createdAt: DateTime.now(),
         customProperties: sys_msg_metadata);
@@ -3802,7 +3799,9 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
     // do not store _is_ephemeral flag
     var saved_metadata =
         Map<String, dynamic>.from(firstMsg.customProperties ?? {});
+
     saved_metadata.remove("_is_ephemeral");
+
     _current_chat = await chatManager.createChat(
         firstMessageText: firstMsg.text,
         firstMessageUsername: "SYSTEM",
@@ -4008,10 +4007,16 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
   }
 
   Future<Map<String, Map<String, dynamic>>> getUserRuntimeSettings() async {
+    var settings = await metaKV.getMetadata("_runtime_app_settings");
+
     Map<String, Map<String, dynamic>> user_runtime_settings =
-        transformMapToNestedMap(await metaKV
-                .getMetadata("_runtime_app_settings", defaultValue: {}) ??
-            {});
+        Map<String, Map<String, dynamic>>();
+
+    if (settings == null) {
+      return user_runtime_settings;
+    } else {
+      user_runtime_settings = transformMapToNestedMap(settings);
+    }
 
     dlog("USER_RUNTIME_SETTINGS: $user_runtime_settings");
 
@@ -4172,7 +4177,7 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
             if (msgs.isNotEmpty) {
               dlog("!!! ${msgs[0]}");
               if (msgs[0].meta != null &&
-                  msgs[0].meta.containsKey("_is_system_message_with_prompt")) {
+                  msgs[0].meta.containsKey("_show_text")) {
                 dlog("FOUND SYSTEM MESSAGE: ${msgs[0]}");
                 if (msgs[0].meta.containsKey("_llm_modelpath")) {
                   return msgs[0].meta!["_llm_modelpath"] as String;
@@ -4696,28 +4701,6 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
                 maxWidth: DESKTOP_MAX_CONTENT_WIDTH,
               ),
         child: Stack(children: <Widget>[
-          if (!_llm_initialized)
-            Center(
-                child: Column(children: [
-              Padding(
-                  padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
-                  child: Container(
-                      padding: const EdgeInsets.all(3.0),
-                      decoration: BoxDecoration(
-                        color: bgColor!,
-                        border: Border.all(
-                          color: lighterActiveColor,
-                          width: 1.0, // Adjust the width of the border here
-                        ),
-                        borderRadius: BorderRadius.circular(
-                            5.0), // Adjust the radius of the border here
-                      ),
-                      child: LinearProgressIndicator(
-                          value: llm_load_progress,
-                          minHeight: 6.0,
-                          borderRadius: BorderRadius.circular(3.0),
-                          color: activeColor)))
-            ])),
           DashChat(
             inputOptions: InputOptions(
                 textController: dashChatInputController,
@@ -4901,7 +4884,36 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
               setState(() {});
             },
             messages: _messages,
-          )
+          ),
+          if (!_llm_initialized)
+            Center(
+                child: Column(children: [
+              Padding(
+                  padding: EdgeInsets.all(isMobile() ? 4.0 : 16.0),
+                  child: Container(
+                      padding: const EdgeInsets.all(8.0),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(
+                            10.0), // Adjust the radius of the border here
+                      ),
+                      child: Container(
+                          padding: const EdgeInsets.all(3.0),
+                          decoration: BoxDecoration(
+                            color: bgColor!,
+                            border: Border.all(
+                              color: lighterActiveColor,
+                              width: 1.0, // Adjust the width of the border here
+                            ),
+                            borderRadius: BorderRadius.circular(
+                                5.0), // Adjust the radius of the border here
+                          ),
+                          child: LinearProgressIndicator(
+                              value: llm_load_progress,
+                              minHeight: 6.0,
+                              borderRadius: BorderRadius.circular(3.0),
+                              color: activeColor))))
+            ])),
         ]),
       )));
     } else {
@@ -6115,7 +6127,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             ],
                           ),
                           FormBuilderTextField(
-                              decoration: InputDecoration(
+                              decoration: const InputDecoration(
                                 enabledBorder: OutlineInputBorder(
                                   borderSide: BorderSide(
                                       color: Colors.red,
@@ -6131,7 +6143,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                     )))));
       },
-      loading: () => CircularProgressIndicator(),
+      loading: () => const CircularProgressIndicator(),
       error: (err, stack) => Text('Error: $err'),
     );
   }

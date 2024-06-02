@@ -6,6 +6,7 @@ import 'package:test/test.dart';
 
 const MODEL_LARGE = "../openhermes-2.5-mistral-7b.Q4_K_M.gguf";
 const MODEL_SMALL = "../tinyllama-1.1b-1t-openorca.Q4_K_M.gguf";
+
 const hermes_sysmsg =
     "You are a helpful, honest, reliable and smart AI assistant named Hermes doing your best at fulfilling user requests. You are cool and extremely loyal. You answer any user requests to the best of your ability.";
 const COUNT_PROMPT = "count from 1 to 3, output only the numbers";
@@ -55,6 +56,12 @@ Future<(bool, List<SUpdate>)> accept_ai_answer_stream(LLMEngine llm,
   }
 
   return (false, updates);
+}
+
+LLMEngine make_llm() {
+  return LLMEngine(
+      libpath: Platform.environment['LLMLIBRPC'] ??
+          './native/apple_silicon/librpcserver.dylib');
 }
 
 void main() async {
@@ -125,7 +132,7 @@ void main() async {
   // });
 
   group("MODEL:LARGE, FRESH -> REINIT", () {
-    LLMEngine llm = LLMEngine();
+    LLMEngine llm = make_llm();
     var completer = Completer<void>();
 
     test("LOAD (INITIAL)", () async {
