@@ -13,10 +13,28 @@ An AI that fits in the palm of your hand.
 TBD
 
 ## MacOS
-
+Note that you will have to deal with signing or bypassing app signature warning on your own.
+```bash
+./rebuild_native_libs.sh 'apple_silicon'
+fvm use 3.22.2
+fvm flutter pub run flutter_launcher_icons:main
+fvm flutter build macos --release;
+```
 ## Linux
+TBD
 
 ## Android
+```bash
+./rebuild_native_libs.sh 'android'
+fvm use 3.22.2
+fvm flutter pub run flutter_launcher_icons:main
+fvm flutter build apk --release;
+```
+=>
+```
+Running Gradle task 'assembleDebug'...                            528.2s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+```
 
 # IMPORTANT LICENSE NOTICE
 Please be aware that this software project is licensed under the GNU General Public License Agreement Version 3 (GPLv3) with additional restrictions. By using, modifying, or distributing this software, you agree to be bound by the terms and conditions of this license.

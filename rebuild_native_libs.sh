@@ -17,6 +17,8 @@ fi
 HHH_DIR=$(pwd)
 HEADER_DIR="./native"
 
+export CMAKE_MAKE_PROGRAM=$(which make)
+
 # Set variables based on the input argument
 if [ "$1" = "android-arm64-v8a-dotprod" ] || [ "$1" = "android" ]; then
   BUILD_FLAVOR="android"
@@ -29,7 +31,7 @@ if [ "$1" = "android-arm64-v8a-dotprod" ] || [ "$1" = "android" ]; then
 elif [ "$1" = "apple-silicon" ]; then
   BUILD_FLAVOR="apple-silicon"
   BUILD_ARCH="apple_silicon"
-  CMAKE_FLAGS="-DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1"
+  CMAKE_FLAGS="-DBUILD_SHARED_LIBS=1 -DLLAMA_METAL=1 -DLLAMA_METAL_EMBED_LIBRARY=1"
   LIB_EXT="dylib"
   TARGET_DIR="macos/Runner"
 else
@@ -59,9 +61,6 @@ cmake --build . --config Release --target rpcserver
 cp "$LLAMACPP_EMBED_DIR/$BUILD_DIR/examples/server/librpcserver.$LIB_EXT" "$HHH_DIR/$DST_DIR/"
 cp "$LLAMACPP_EMBED_DIR/$BUILD_DIR/libllama.$LIB_EXT" "$HHH_DIR/$DST_DIR/"
 cp "$LLAMACPP_EMBED_DIR/examples/server/rpcserver.h" "$HHH_DIR/$HEADER_DIR/"
-if [ "$BUILD_FLAVOR" = "apple-silicon" ]; then
-  cp "$LLAMACPP_EMBED_DIR/ggml-metal.metal" "$HHH_DIR/$DST_DIR/"
-fi
 
 # Copy artifacts to target directory
 if [ "$BUILD_FLAVOR" = "android" ]; then
@@ -69,7 +68,6 @@ if [ "$BUILD_FLAVOR" = "android" ]; then
   echo "$HHH_DIR/$DST_DIR/"
   cp "$HHH_DIR/$DST_DIR/"* "$HHH_DIR/$TARGET_DIR/"
 else
-  cp "$HHH_DIR/$DST_DIR/ggml-metal.metal" "$HHH_DIR/$TARGET_DIR/"
   cp "$HHH_DIR/$DST_DIR/librpcserver.$LIB_EXT" "$HHH_DIR/$TARGET_DIR/"
   cp "$HHH_DIR/$DST_DIR/libllama.$LIB_EXT" "$HHH_DIR/$TARGET_DIR/"
 fi

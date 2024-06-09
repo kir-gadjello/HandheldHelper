@@ -66,7 +66,6 @@ dependencies:
   system_info2: ^4.0.0
   disk_space_plus: ^0.2.3
   desktop_disk_space: ^0.0.1
-  background_downloader: ^8.0.1
   filesystem_picker: ^4.0.0
   riverpod: ^2.4.8
   flutter_riverpod: ^2.4.8
@@ -76,6 +75,7 @@ dependencies:
   jinja: ^0.6.0
   flutter_fast_forms: ^16.0.0
   cached_network_image: ^3.3.1
+  background_downloader: ^8.5.2
 #  form_builder_cupertino_fields: ^0.2.1
 
 dev_dependencies:

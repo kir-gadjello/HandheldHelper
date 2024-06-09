@@ -331,6 +331,25 @@ final MiniChatPromptFormat = LLMPromptFormat(
     fixer: create_fixer("</s>"),
     separator: "</s>");
 
+String format_llama3(List<AIChatMessage> messages,
+    {bool add_assistant_preprompt = true}) {
+  String ret = "<|begin_of_text|>";
+  for (final msg in messages) {
+    ret +=
+        "<|start_header_id|>${msg.role}<|end_header_id|>\\n\\n${msg.content}<|eot_id|>";
+  }
+  if (add_assistant_preprompt) {
+    ret += "<|start_header_id|>assistant<|end_header_id|>\\n\\n";
+  }
+  return ret;
+}
+
+final Llama3ChatPromptFormat = LLMPromptFormat(
+    name: "llama3",
+    formatter: format_llama3,
+    fixer: create_fixer("<|eot_id|>"),
+    separator: "<|eot_id|>");
+
 String format_chatml(List<AIChatMessage> messages,
     {bool add_assistant_preprompt = true}) {
   String ret = "";
@@ -720,7 +739,8 @@ class LLMEngine {
       Map<String, dynamic> init_json = {
         "model": modelpath,
         "use_mmap": false,
-        "use_mlock": false
+        "use_mlock": false,
+        "fa": true // enable flash attention by default
       };
 
       if (llama_init_json != null) {

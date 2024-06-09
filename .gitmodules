@@ -5,3 +5,13 @@
 	path = llamacpp-embed
 	url = https://github.com/kir-gadjello/llamacpp-embed
 	branch = libllamarpc-private
+[submodule "lib/llamacpp-embed"]
+	path = lib/llamacpp-embed
+	url = https://github.com/kir-gadjello/llamacpp-embed
+	branch = libllamarpc-private
+[submodule "libraries/libraries/background_downloader"]
+	path = libraries/libraries/background_downloader
+	url = https://github.com/781flyingdutchman/background_downloader
+[submodule "libraries/background_downloader"]
+	path = libraries/background_downloader
+	url = https://github.com/781flyingdutchman/background_downloader

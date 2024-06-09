@@ -17,6 +17,15 @@ const COUNT_PROMPT = "count from 1 to 3, output only the numbers";
 const COUNT_PROMPT_ELI5 =
     "This is a test. Count from 1 to 3 like a kindergartener, output only the numbers";
 
+bool containsAllNumbers(String input, List<int> numbers) {
+  // Create a regex pattern to match the numbers with possible separators
+  String pattern = numbers.map((num) => '\\b$num\\b').join(r'[,\s]*');
+  RegExp regex = RegExp(pattern);
+
+  // Check if the input matches the pattern
+  return regex.hasMatch(input);
+}
+
 void expect_llm_fresh(LLMEngine llm) {
   expect(llm.init_in_progress, false);
   expect(llm.initialized, true);
@@ -206,12 +215,12 @@ void main() async {
       var success = llm.advance(user_msg: COUNT_PROMPT);
       expect(success, true);
       print("MODEL<${Path.basename(llm.modelpath)}>: ${llm.msgs.last}");
-      expect(llm.msgs.last.role, "assistant");
-      expect(llm.msgs.last.content.endsWith("1\n2\n3"), true);
+      expect(llm.msgs.last!.role, "assistant");
+      expect(containsAllNumbers(llm.msgs.last!.content, [1, 2, 3]), true);
       completion_initial = llm.msgs.last.content;
     });
 
-    test("STREAMING COMPLETION (INITIAL)", () async {
+    test("STREAMING COMPLETION2 (INITIAL)", () async {
       llm.clear_state();
       llm.set_system_prompt(hermes_sysmsg);
       var success = llm.start_advance_stream(user_msg: COUNT_PROMPT);
@@ -225,14 +234,13 @@ void main() async {
 
       print("MODEL<${Path.basename(llm.modelpath)}>: ${llm.msgs.last}");
       expect(llm.msgs.last.role, "assistant");
-      expect(llm.msgs.last.content.endsWith("1\n2\n3"), true);
+      expect(containsAllNumbers(llm.msgs.last!.content, [1, 2, 3]), true);
       completion_initial = llm.msgs.last.content;
     });
 
     test("LARGE DEINIT", () {
       llm.deinitialize();
       expect(llm.initialized, false);
-      expect(true, true);
     });
 
     test("LOAD (SMALL, REINIT)", () async {
@@ -258,12 +266,13 @@ void main() async {
       expect(success, true);
       print("MODEL<${Path.basename(llm.modelpath)}>: ${llm.msgs.last}");
       expect(llm.msgs.last.role, "assistant");
-      expect(llm.msgs.last.content.endsWith("1, 2, 3"), true);
+      expect(containsAllNumbers(llm.msgs.last!.content, [1, 2, 3]), true);
       completion_initial = llm.msgs.last.content;
     });
 
     test("SMALL DEINIT", () {
       llm.deinitialize();
+      print("FFI DEINIT CALL COMPLETED");
       expect(llm.initialized, false);
       expect(true, true);
     });

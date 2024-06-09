@@ -87,20 +87,20 @@ final MIN_STREAM_PERSIST_INTERVAL = isMobile() ? 1400 : 500;
 
 final APPROVED_LLMS = [
   LLMref(
+      name: 'Llama-3-8b-Instruct',
+      gguf_name: "Meta-Llama-3-8B-Instruct-Q4_K_S.gguf",
+      size: 4692668992,
+      ctxlen: "8k",
+      sources: [
+        "https://huggingface.co/bartowski/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct-Q4_K_S.gguf"
+      ]),
+  LLMref(
       name: 'OpenHermes-2.5-Mistral-7B',
       gguf_name: "teknium_openhermes-2.5-mistral-7b",
       size: 4368450304,
       ctxlen: "8k",
       sources: [
         "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf"
-      ]),
-  LLMref(
-      name: 'OpenHermes-2-Mistral-7B',
-      gguf_name: "teknium_openhermes-2-mistral-7b",
-      size: 4368450272,
-      ctxlen: "8k",
-      sources: [
-        "https://huggingface.co/TheBloke/OpenHermes-2-Mistral-7B-GGUF/resolve/main/openhermes-2-mistral-7b.Q4_K_M.gguf"
       ]),
   LLMref(
       name: "TinyLLAMA-1t-OpenOrca",
@@ -119,25 +119,10 @@ final APPROVED_LLMS = [
       sources: [
         "https://huggingface.co/afrideva/MiniChat-1.5-3B-GGUF/resolve/main/minichat-1.5-3b.q4_k_m.gguf"
       ]),
-  LLMref(
-      name: "OpenChat-3.5-1210",
-      gguf_name: "openchat_openchat-3.5-1210",
-      size: 4368450656,
-      ctxlen: "8k",
-      sources: [
-        "https://huggingface.co/TheBloke/openchat-3.5-1210-GGUF/resolve/main/openchat-3.5-1210.Q4_K_M.gguf"
-      ]),
-  LLMref(
-      name: "Dolphin-2.6-mistral-7B",
-      gguf_name: "cognitivecomputations_dolphin-2.6-mistral-7b",
-      size: 4369381088,
-      ctxlen: "16k",
-      sources: [
-        "https://huggingface.co/TheBloke/dolphin-2.6-mistral-7B-GGUF/resolve/main/dolphin-2.6-mistral-7b.Q4_K_M.gguf"
-      ])
 ];
 
 Map<String, LLMPromptFormat> known_prompt_formats = {
+  "llama3": Llama3ChatPromptFormat,
   "chatml": ChatMLPromptFormat,
   "minichat": MiniChatPromptFormat
 };
@@ -1038,8 +1023,8 @@ class _BackgroundDownloadWidgetState extends State<BackgroundDownloadWidget> {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label:
-          'HttpDownloadWidget', // Added this line to provide a unique label for the widget
+      label: 'HttpDownloadWidget',
+      // Added this line to provide a unique label for the widget
       child: Column(
         children: [
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1423,6 +1408,7 @@ class AppInitParams {
   RootAppParams? params;
   HHHDefaults defaults;
   bool storagePermissionGranted;
+
   AppInitParams(this.defaults,
       {this.params, this.storagePermissionGranted = false});
 }
@@ -4025,23 +4011,6 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
 
   void reload_model_from_file(
       String new_modelpath, VoidCallback? onInitDone) async {
-    // final metadata =
-    //     await parseGGUF(new_modelpath, findKeys: {"llama.context_length"});
-    //
-    // int native_ctxlen = extract_ctxlen_from_name(new_modelpath) ??
-    //     metadata?["llama.context_length"] ??
-    //     DEFAULT_CTXLEN;
-    //
-    // var model_filename = Path.basename(new_modelpath);
-    //
-    // if (APPROVED_LLMS.map((m) => m.getFileName()).contains(model_filename)) {
-    //   var maybeApprovedLLM =
-    //       APPROVED_LLMS.firstWhere((m) => m.getFileName() == model_filename);
-    //   if (maybeApprovedLLM != null && maybeApprovedLLM.native_ctxlen != null) {
-    //     native_ctxlen = maybeApprovedLLM.native_ctxlen!;
-    //   }
-    // }
-
     var native_ctxlen = await resolve_native_ctxlen(new_modelpath);
 
     setState(() {
@@ -4809,7 +4778,8 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
                         min(MediaQuery.of(context).size.width,
                                 DESKTOP_MAX_CONTENT_WIDTH) -
                             30.0),
-                fullWidthRow: true, // || isMobile(),
+                fullWidthRow: true,
+                // || isMobile(),
                 containerColor: aiMsgColor!,
                 currentUserContainerColor: userMsgColor!,
                 textColor: textColor!,
@@ -4830,8 +4800,8 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
                           bottomLeft: Radius.circular(14.0)),
                       border: Border(
                         right: BorderSide(
-                          color:
-                              userMsgBorderColor, // Change this to your desired color
+                          color: userMsgBorderColor,
+                          // Change this to your desired color
                           width: 2, // Change this to your desired width
                         ),
                       ),
@@ -4855,8 +4825,8 @@ class ActiveChatDialogState extends ConsumerState<ActiveChatDialog>
                           bottomRight: Radius.circular(14.0)),
                       border: Border(
                         left: BorderSide(
-                          color:
-                              aiMsgBorderColor, // Change this to your desired color
+                          color: aiMsgBorderColor,
+                          // Change this to your desired color
                           width: 2, // Change this to your desired width
                         ),
                       ),
@@ -5139,6 +5109,7 @@ const SEARCH_MAX_SNIPPET_LENGTH = 500;
 
 class SearchPage extends StatefulWidget {
   Function(AppPage)? navigate;
+
   SearchPage({this.navigate});
 
   @override
@@ -5356,6 +5327,7 @@ Widget buildDashChatHistory(BuildContext context, List<ChatMessage> messages) {
 
 class SingleChatHistoryPage extends StatefulWidget {
   final String? chatId;
+
   SingleChatHistoryPage({this.chatId});
 
   @override
@@ -6406,6 +6378,7 @@ class NavigationProvider extends InheritedWidget {
 
 class PseudoRouter extends StatefulWidget {
   final AppInitParams appInitParams;
+
   PseudoRouter(this.appInitParams);
 
   @override
@@ -6526,6 +6499,7 @@ Color getAIMsgColor(BuildContext context) =>
 
 class HandheldHelper extends ConsumerWidget {
   const HandheldHelper({super.key});
+
   // const Color.fromRGBO(21, 33, 59, 1.0)
   // const Color.fromRGBO(39, 49, 39, 1.0)
 
