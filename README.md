@@ -4,6 +4,18 @@ Basic AI capability should be owned by everyone.
 
 An AI that fits in the palm of your hand.
 
+This is a prototype of minimalistic cross-platform chat application (tested on Android, Linux, MacOS) written in Flutter that uses a heavily customized llama.cpp as a built-in inference engine. Initially it was developed for use on my own hardware in November 2023, due to inadequacy and clunkiness of solutions for on-device LLMs, especially Android, at the time. Updating to the recent version of llama.cpp has caused problems with the support of less standard models like Phi; to be resolved.
+
+Basic functionality provided:
+
+- Model selection
+- Chat template selection
+- System message customization
+- Stopping generation
+- HTML code execution in a pop-up window
+- Search over historical chats
+- Default model download from Huggingface
+
 # Hardware requirements
 * Mobile: An Android smartphone with >=4GiB RAM
 * Desktop: A Mac M1 with >=16GiB RAM, a Linux PC with >=16GiB RAM
